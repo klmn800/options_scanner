@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Council Chat Room</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='chat.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Header -->
+        <header class="chat-header">
+            <div class="header-content">
+                <h1>🎭 AI Council Chat Room</h1>
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="statusText">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Chat Controls -->
+        <div class="chat-controls">
+            <div class="control-group">
+                <button id="clearChatButton" class="control-btn">
+                    <span class="btn-icon">🗑</span>
+                    <span>Clear Chat</span>
+                </button>
+                <button id="saveTranscriptButton" class="control-btn">
+                    <span class="btn-icon">💾</span>
+                    <span>Save Transcript</span>
+                </button>
+            </div>
+            
+            <div class="control-group">
+                <div class="personality-controls">
+                    <span class="control-label">AI Personalities:</span>
+                    <div id="activePersonalities" class="active-personalities">
+                        <!-- Active personalities will appear here -->
+                    </div>
+                    <select id="addPersonalitySelect" class="personality-select">
+                        <option value="">Add AI Personality...</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <main class="chat-main">
+            <!-- Messages Container -->
+            <div class="messages-container" id="messagesContainer">
+                <div class="welcome-message">
+                    <p>👋 Welcome to the AI Council Chat Room!</p>
+                    <p>Start typing to begin the conversation...</p>
+                </div>
+            </div>
+
+            <!-- Typing Indicators -->
+            <div class="typing-indicators" id="typingIndicators">
+                <!-- Typing indicators will appear here -->
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer class="chat-input-area">
+            <div class="input-container">
+                <input 
+                    type="text" 
+                    id="messageInput" 
+                    placeholder="Type your message..." 
+                    autocomplete="off"
+                    disabled
+                >
+                <button id="sendButton" disabled>
+                    <span>Send</span>
+                    <span class="send-icon">→</span>
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- User Name Config (Easy to modify for Ben) -->
+    <script>
+        // 🔧 EASY CONFIGURATION - Change your name here
+        const USER_CONFIG = {
+            name: 'Ben',           // Your display name
+            room: 'council-main',  // Chat room name
+            avatar: '👤',          // Your avatar emoji (optional)
+            theme: 'dark'          // UI theme
+        };
+    </script>
+
+    <!-- Main Chat JavaScript -->
+    <script src="{{ url_for('static', filename='chat.js') }}"></script>
+</body>
+</html>

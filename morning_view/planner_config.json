@@ -1,0 +1,15 @@
+{
+  "capital": {
+    "total_capital": 1200,
+    "target_position_size": 200,
+    "warning_threshold_pct": 80
+  },
+  "defaults": {
+    "default_entry_days_before": 14,
+    "default_exit_days_before": 2
+  },
+  "archival": {
+    "auto_archive_closed": false,
+    "archive_after_days": 7
+  }
+}

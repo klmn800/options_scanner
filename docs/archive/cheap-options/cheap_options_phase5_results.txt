@@ -1,0 +1,11 @@
+PHASE 5: IN-SAMPLE VALIDATION RESULTS
+================================================================================
+
+Total Entries: 1735
+Winners: 196 (11.3%)
+Losers: 1539
+Average Winner: 105.7%
+Average Loser: -25.7%
+Expected Value: -10.9%
+
+Status: FAIL

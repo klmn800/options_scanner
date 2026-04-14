@@ -1,0 +1,79 @@
+Symbol,Company,Country,Sector,Industry,Has Quote,Has Options,Price,Avg Volume,52w High,52w Low,Num Expirations
+AEM,Agnico Eagle Mines,Canada,Basic Materials,Gold Mining,True,True,218.69,2765528,255.24,94.77,21
+AU,AngloGold Ashanti,South Africa,Basic Materials,Gold Mining,True,True,104.75,2267788,129.14,31.58,7
+BHP,BHP Group,Australia,Basic Materials,Diversified Mining,True,True,70.90,4115644,83.22,39.73,10
+FNV,Franco-Nevada,Canada,Basic Materials,Precious Metals Royalties,True,True,263.37,822278,285.67,140.03,6
+GOLD,Barrick Gold,Canada,Basic Materials,Gold Mining,True,True,49.19,,66.70,17.00,7
+RIO,Rio Tinto,UK/Australia,Basic Materials,Diversified Mining,True,True,90.73,3885870,101.53,51.67,11
+SQM,Sociedad Quimica y Minera,Chile,Basic Materials,Lithium/Chemicals,True,True,75.74,1418290,86.13,29.36,7
+TECK,Teck Resources,Canada,Basic Materials,Diversified Mining,True,True,51.90,4497616,62.41,28.32,16
+VALE,Vale SA,Brazil,Basic Materials,Iron Ore/Mining,True,True,15.05,37205281,17.72,8.05,15
+WPM,Wheaton Precious Metals,Canada,Basic Materials,Precious Metals Streaming,True,True,146.26,2295929,165.76,68.03,15
+AMX,America Movil,Mexico,Communication Services,Telecom,True,True,23.04,2590476,26.16,13.10,4
+SPOT,Spotify,Sweden,Communication Services,Music Streaming,True,True,511.01,1297445,785.00,405.00,20
+FLUT,Flutter Entertainment,Ireland,Consumer Cyclical,Sports Betting,True,True,106.50,511310,313.69,99.96,7
+HMC,Honda Motor,Japan,Consumer Cyclical,Automotive,True,True,26.05,1154197,34.89,24.56,8
+JD,JD.com,China,Consumer Cyclical,E-commerce,True,True,27.93,9828564,45.75,24.51,18
+LI,Li Auto,China,Consumer Cyclical,Electric Vehicles,True,True,17.84,3791300,32.02,15.71,13
+MELI,MercadoLibre,Argentina,Consumer Cyclical,E-commerce/Fintech,True,True,1665.26,528877,2645.22,1654.24,21
+NIO,NIO Inc,China,Consumer Cyclical,Electric Vehicles,True,True,5.54,44406963,8.02,3.02,14
+STLA,Stellantis,Netherlands,Consumer Cyclical,Automotive,True,True,6.88,15414567,12.74,6.85,13
+TM,Toyota Motor,Japan,Consumer Cyclical,Automotive,True,True,216.35,319889,248.90,155.00,10
+XPEV,XPeng,China,Consumer Cyclical,Electric Vehicles,True,True,20.09,6919635,28.23,15.38,14
+YUMC,Yum China,China,Consumer Cyclical,Restaurants,True,True,52.38,2732939,58.39,41.00,5
+ABEV,Ambev,Brazil,Consumer Defensive,Beverages,True,True,2.87,25323263,3.24,2.10,5
+BTI,British American Tobacco,UK,Consumer Defensive,Tobacco,True,True,59.82,4422178,63.22,37.96,9
+DEO,Diageo,UK,Consumer Defensive,Beverages - Spirits,True,True,76.89,1939713,116.69,79.68,5
+UL,Unilever,UK/Netherlands,Consumer Defensive,Consumer Staples,True,True,64.45,3224655,74.97,55.05,9
+BP,BP plc,UK,Energy,Integrated Oil & Gas,True,True,42.12,10006571,41.59,25.22,17
+CNQ,Canadian Natural Resources,Canada,Energy,Oil & Gas,True,True,48.51,9770781,47.47,24.65,13
+E,Eni SpA,Italy,Energy,Oil & Gas,True,True,50.24,322429,49.40,24.65,10
+EC,Ecopetrol,Colombia,Energy,Oil & Gas,True,True,13.98,3046749,13.57,7.79,4
+EQNR,Equinor,Norway,Energy,Oil & Gas,True,True,34.40,5562433,34.19,21.41,6
+PBR,Petrobras,Brazil,Energy,Oil & Gas,True,True,19.04,24844581,19.02,11.03,20
+SHEL,Shell plc,UK/Netherlands,Energy,Integrated Oil & Gas,True,True,88.42,5944939,87.46,58.55,17
+SU,Suncor Energy,Canada,Energy,Oil Sands,True,True,59.75,5147418,58.63,30.79,15
+TRP,TC Energy,Canada,Energy,Pipelines/Midstream,True,True,63.24,2356624,65.57,43.59,5
+TTE,TotalEnergies,France,Energy,Integrated Oil & Gas,True,True,81.36,1568574,82.21,52.78,10
+WDS,Woodside Energy,Australia,Energy,LNG,True,True,22.27,1084994,22.44,11.26,5
+YPF,YPF SA,Argentina,Energy,Oil & Gas,True,True,38.41,1455781,40.38,22.82,6
+BAM,Brookfield Asset Management,Canada,Financial Services,Asset Management,True,True,42.95,3036986,64.10,41.78,7
+BBVA,Banco Bilbao Vizcaya,Spain,Financial Services,Banking,True,True,20.88,1972528,26.20,11.59,4
+BN,Brookfield Corporation,Canada,Financial Services,Asset Management,True,True,38.86,5196043,49.56,29.07,5
+DB,Deutsche Bank,Germany,Financial Services,Banking,True,True,29.52,2960638,40.43,18.89,7
+HDB,HDFC Bank,India,Financial Services,Banking,True,True,28.30,6006394,39.81,28.32,4
+IBN,ICICI Bank,India,Financial Services,Banking,True,True,26.84,6389085,34.56,27.09,6
+ING,ING Group,Netherlands,Financial Services,Banking,True,True,26.23,2577435,31.18,16.46,5
+ITUB,Itau Unibanco,Brazil,Financial Services,Banking,True,True,8.10,24797346,9.60,4.82,5
+KB,KB Financial,South Korea,Financial Services,Banking,True,True,99.32,220714,119.71,46.38,4
+MFG,Mizuho Financial,Japan,Financial Services,Banking,True,True,7.74,4373914,10.28,4.04,4
+MUFG,Mitsubishi UFJ Financial,Japan,Financial Services,Banking,True,True,16.45,3541910,20.14,10.46,4
+SAN,Banco Santander,Spain,Financial Services,Banking,True,True,11.01,11237322,13.24,5.54,6
+SMFG,Sumitomo Mitsui Financial,Japan,Financial Services,Banking,True,True,19.34,2152698,24.34,11.83,4
+TD,Toronto-Dominion Bank,Canada,Financial Services,Banking,True,True,94.05,2306639,99.84,54.87,7
+UBS,UBS Group,Switzerland,Financial Services,Investment Banking,True,True,37.50,2483757,49.36,25.75,6
+ARGX,argenx SE,Netherlands,Healthcare,Biotech - Autoimmune,True,True,709.87,364402,934.62,510.06,8
+GSK,GSK plc,UK,Healthcare,Pharma,True,True,54.34,5179702,61.70,32.38,13
+LEGN,Legend Biotech,China,Healthcare,Cell Therapy,True,True,19.16,2425767,45.30,16.24,7
+NVO,Novo Nordisk,Denmark,Healthcare,Pharma - GLP-1/Obesity,True,True,38.12,24268861,82.57,35.85,18
+NVS,Novartis,Switzerland,Healthcare,Pharma,True,True,154.21,2185810,170.46,97.72,10
+SNY,Sanofi,France,Healthcare,Pharma,True,True,43.78,3920684,59.16,43.34,9
+TAK,Takeda Pharmaceutical,Japan,Healthcare,Pharma,True,True,17.77,2938521,18.82,12.99,4
+ASML,ASML Holding,Netherlands,Technology,Semiconductor Equipment,True,True,1348.03,1723882,1547.22,578.51,19
+BABA,Alibaba Group,China,Technology,E-commerce/Cloud,True,True,133.99,11323603,192.67,95.73,23
+BIDU,Baidu,China,Technology,Search/AI,True,True,122.86,2915204,165.30,74.71,18
+ERIC,Ericsson,Sweden,Technology,Telecom Equipment,True,True,11.40,8814889,11.70,6.64,4
+GLOB,Globant,Argentina,Technology,IT Services,True,True,45.39,185986,142.25,40.76,5
+GRAB,Grab Holdings,Singapore,Technology,Ride-hail/Delivery,True,True,3.73,46425168,6.62,3.36,14
+INFY,Infosys,India,Technology,IT Services,True,True,13.48,16759224,30.00,13.59,12
+NOK,Nokia,Finland,Technology,Telecom Equipment,True,True,8.10,36922064,8.37,4.00,18
+SAP,SAP SE,Germany,Technology,Enterprise Software,True,True,190.66,2679623,313.28,187.94,14
+SE,Sea Limited,Singapore,Technology,E-commerce/Gaming,True,True,85.03,6011289,199.30,77.05,17
+SHOP,Shopify,Canada,Technology,E-commerce Platform,True,True,126.00,8011504,182.19,69.84,22
+TSM,TSMC,Taiwan,Technology,Semiconductors,True,True,338.05,13191623,390.20,134.25,22
+WIT,Wipro,India,Technology,IT Services,True,True,2.29,10939523,3.18,2.11,4
+WIX,Wix.com,Israel,Technology,Web Platform,True,True,87.35,687522,191.24,60.22,6
+VEDL,Vedanta Limited,India,Basic Materials,Diversified Mining,False,False,,,,,0
+TEF,Telefonica,Spain,Communication Services,Telecom,False,False,,,,,0
+CSAN,Cosan,Brazil,Energy,Energy/Logistics,True,False,4.29,2255169,6.25,3.71,0
+BGNE,BeiGene,China,Healthcare,Oncology Biotech,False,False,,,,,0

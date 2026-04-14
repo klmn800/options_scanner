@@ -1,0 +1,880 @@
+#!/usr/bin/env python3
+"""
+AI Council Chat Room Server
+===========================
+
+Flask server with WebSocket support for real-time AI personality chat.
+
+PHASE 1: Basic Flask setup with message sending/receiving
+PHASE 2: AI personality integration  
+PHASE 3: Multi-personality chat with typing indicators
+
+Usage:
+    python chat_server.py
+    # Open browser to http://localhost:5000
+"""
+
+from flask import Flask, render_template, request
+from flask_socketio import SocketIO, emit, join_room, leave_room
+import uuid
+from datetime import datetime
+import json
+import logging
+import threading
+import time
+
+# Configure comprehensive logging for debugging with Unicode handling
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('chat_server.log', mode='a', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Helper function to safely log text with Unicode characters
+def safe_log_text(text, max_length=100):
+    """Safely log text by removing problematic Unicode characters"""
+    if not text:
+        return "<empty>"
+    try:
+        # Remove or replace problematic Unicode characters
+        safe_text = text.encode('ascii', errors='replace').decode('ascii')
+        if len(safe_text) > max_length:
+            return safe_text[:max_length] + "..."
+        return safe_text
+    except Exception:
+        return "<logging-error>"
+
+# Import AI personality system
+try:
+    from chat_personalities_working import load_personality_for_chat, get_available_personalities
+    AI_PERSONALITIES_AVAILABLE = True
+    logger.info("AI personality system loaded successfully")
+except ImportError as e:
+    logger.error(f"Could not load AI personality system: {e}")
+    AI_PERSONALITIES_AVAILABLE = False
+
+# Initialize Flask app
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'ai-council-secret-key-2024'
+
+# Initialize SocketIO
+socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
+
+# In-memory storage for active sessions and chat history
+active_sessions = {}
+chat_rooms = {}
+
+class ChatRoom:
+    """Represents a chat room session"""
+    
+    def __init__(self, room_id):
+        self.room_id = room_id
+        self.created_at = datetime.now()
+        self.messages = []
+        self.participants = {}  # socket_id: user_info
+        self.ai_personalities = []  # Will be populated in Phase 2
+        
+    def add_message(self, message):
+        """Add a message to the chat history"""
+        message['timestamp'] = datetime.now().isoformat()
+        message['id'] = str(uuid.uuid4())
+        self.messages.append(message)
+        logger.info(f"Message added to room {self.room_id}: {message['sender']}")
+        
+    def get_messages(self, limit=50):
+        """Get recent messages"""
+        return self.messages[-limit:]
+    
+    def add_participant(self, socket_id, user_info):
+        """Add a participant to the room"""
+        self.participants[socket_id] = user_info
+        logger.info(f"Participant added to room {self.room_id}: {user_info.get('name', 'Unknown')}")
+    
+    def remove_participant(self, socket_id):
+        """Remove a participant from the room"""
+        if socket_id in self.participants:
+            user_info = self.participants.pop(socket_id)
+            logger.info(f"Participant removed from room {self.room_id}: {user_info.get('name', 'Unknown')}")
+    
+    def add_ai_personality(self, code_name):
+        """Add an AI personality to the room"""
+        logger.debug(f"PERSONALITY_ADD: Starting to add personality '{code_name}' to room {self.room_id}")
+        
+        if not AI_PERSONALITIES_AVAILABLE:
+            logger.warning(f"PERSONALITY_ADD: AI personalities not available for room {self.room_id}")
+            return False
+        
+        try:
+            logger.debug(f"PERSONALITY_ADD: Calling load_personality_for_chat('{code_name}')")
+            personality = load_personality_for_chat(code_name)
+            
+            if personality:
+                logger.debug(f"PERSONALITY_ADD: Successfully loaded {personality.display_name} ({personality.code_name})")
+                
+                # Check if already added
+                for existing in self.ai_personalities:
+                    if existing.code_name == code_name:
+                        logger.warning(f"PERSONALITY_ADD: Personality {code_name} already in room {self.room_id}")
+                        return False
+                
+                self.ai_personalities.append(personality)
+                logger.info(f"PERSONALITY_ADD: Successfully added {personality.display_name} to room {self.room_id}")
+                logger.debug(f"PERSONALITY_ADD: Room {self.room_id} now has {len(self.ai_personalities)} personalities")
+                return True
+            else:
+                logger.error(f"PERSONALITY_ADD: load_personality_for_chat returned None for '{code_name}'")
+                return False
+                
+        except Exception as e:
+            logger.error(f"PERSONALITY_ADD: Failed to add AI personality {code_name}: {e}")
+            import traceback
+            logger.debug(f"PERSONALITY_ADD: Exception traceback: {traceback.format_exc()}")
+        
+        return False
+    
+    def _parse_mentions(self, message):
+        """Parse @mentions from a chat message"""
+        import re
+        
+        # Find all @mentions in the format @personality_code_name
+        mentions = re.findall(r'@(\w+)', message)
+        logger.debug(f"MENTION_PARSER: Found raw mentions: {mentions}")
+        
+        # Get list of valid personality code names for validation
+        try:
+            from chat_personalities_working import get_available_personalities
+            valid_personalities = get_available_personalities()
+            logger.debug(f"MENTION_PARSER: Valid personality codes: {valid_personalities}")
+            
+            # Filter mentions to only include valid personality code names
+            valid_mentions = [mention for mention in mentions if mention in valid_personalities]
+            logger.debug(f"MENTION_PARSER: Valid mentions found: {valid_mentions}")
+            
+            return valid_mentions
+            
+        except Exception as e:
+            logger.error(f"MENTION_PARSER: Error validating mentions: {e}")
+            # Return all mentions if validation fails
+            return mentions
+    
+    def get_ai_responses(self, user_message, user_name):
+        """Get responses from mentioned AI personalities in the room"""
+        logger.debug(f"AI_RESPONSE: Starting get_ai_responses for room {self.room_id}")
+        safe_user_message = user_message[:100] + "..." if len(user_message) > 100 else user_message
+        logger.debug(f"AI_RESPONSE: User message: '{safe_user_message}' from {user_name}")
+        
+        responses = []
+        
+        if not AI_PERSONALITIES_AVAILABLE:
+            logger.warning(f"AI_RESPONSE: AI personalities not available for room {self.room_id}")
+            return responses
+            
+        if not self.ai_personalities:
+            logger.warning(f"AI_RESPONSE: No AI personalities loaded in room {self.room_id}")
+            return responses
+        
+        # Parse @mentions from the message
+        mentioned_personalities = self._parse_mentions(user_message)
+        logger.info(f"AI_RESPONSE: Found {len(mentioned_personalities)} mentions in message: {mentioned_personalities}")
+        
+        # If no @mentions found, check for single bot fallback
+        if not mentioned_personalities:
+            # If there's only one personality in the room, let it respond by default
+            if len(self.ai_personalities) == 1:
+                personalities_to_respond = self.ai_personalities
+                logger.info(f"AI_RESPONSE: No @mentions found, but only one personality in room - {self.ai_personalities[0].display_name} will respond by default")
+            else:
+                logger.info(f"AI_RESPONSE: No @mentions found and multiple personalities available - no AI responses will be generated")
+                return responses
+        else:
+            # Filter to only mentioned personalities that are loaded in the room
+            personalities_to_respond = []
+            for personality in self.ai_personalities:
+                if personality.code_name in mentioned_personalities:
+                    personalities_to_respond.append(personality)
+                    logger.debug(f"AI_RESPONSE: Will query {personality.display_name} ({personality.code_name})")
+                else:
+                    logger.debug(f"AI_RESPONSE: Skipping {personality.display_name} ({personality.code_name}) - not mentioned")
+        
+        if not personalities_to_respond:
+            logger.info(f"AI_RESPONSE: None of the mentioned personalities are loaded in this room")
+            return responses
+        
+        logger.info(f"AI_RESPONSE: Will query {len(personalities_to_respond)} mentioned personalities")
+        
+        # Create context from recent messages
+        recent_messages = self.get_messages(limit=10)
+        logger.debug(f"AI_RESPONSE: Building context from {len(recent_messages)} recent messages")
+        
+        context = f"Chat context - Recent discussion:\n"
+        for msg in recent_messages[-5:]:  # Last 5 messages for context
+            context += f"{msg['sender']}: {msg['message']}\n"
+        context += f"\n{user_name} just said: {user_message}\n\nPlease respond briefly and conversationally."
+        
+        logger.debug(f"AI_RESPONSE: Context created (length: {len(context)} chars)")
+        
+        for i, personality in enumerate(personalities_to_respond):
+            try:
+                logger.info(f"AI_RESPONSE: [{i+1}/{len(personalities_to_respond)}] Requesting response from {personality.display_name}")
+                logger.debug(f"AI_RESPONSE: About to call personality.ask_for_chat() for {personality.code_name}")
+                
+                # Make the actual API call with timeout handling
+                import threading
+                import time
+                
+                # Use a thread-based timeout for Windows compatibility
+                response_container = {}
+                exception_container = {}
+                
+                def api_call_thread():
+                    try:
+                        response_container['result'] = personality.ask_for_chat(context)
+                    except Exception as e:
+                        exception_container['error'] = e
+                
+                # Start the API call in a separate thread
+                thread = threading.Thread(target=api_call_thread, daemon=True)
+                thread.start()
+                thread.join(timeout=30.0)  # 30-second timeout
+                
+                if thread.is_alive():
+                    logger.warning(f"AI_RESPONSE: API call timed out for {personality.display_name}")
+                    continue
+                
+                if 'error' in exception_container:
+                    raise exception_container['error']
+                
+                if 'result' not in response_container:
+                    logger.warning(f"AI_RESPONSE: No response from {personality.display_name}")
+                    continue
+                    
+                response = response_container['result']
+                
+                # Use safe logging to avoid Unicode crashes
+                safe_response = response[:200] + "..." if len(response) > 200 else response
+                logger.debug(f"AI_RESPONSE: Raw response from {personality.display_name}: '{safe_response}'")
+                
+                if not response or not response.strip():
+                    logger.warning(f"AI_RESPONSE: Got empty response from {personality.display_name}")
+                    continue
+                
+                # Create message object
+                ai_message = {
+                    'sender': personality.display_name,
+                    'sender_type': 'ai',
+                    'sender_id': f'ai_{personality.code_name}',
+                    'message': response.strip(),
+                    'room_id': self.room_id,
+                    'personality_info': {
+                        'code_name': personality.code_name,
+                        'avatar': personality.avatar,
+                        'color': personality.message_color
+                    }
+                }
+                
+                responses.append(ai_message)
+                logger.info(f"AI_RESPONSE: Successfully got response from {personality.display_name} (length: {len(response)} chars)")
+                safe_preview = response[:100] + "..." if len(response) > 100 else response
+                logger.debug(f"AI_RESPONSE: Response preview: '{safe_preview}'")
+                
+            except Exception as e:
+                logger.error(f"AI_RESPONSE: Exception getting response from {personality.display_name}: {e}")
+                import traceback
+                logger.debug(f"AI_RESPONSE: Exception traceback: {traceback.format_exc()}")
+                continue
+        
+        logger.info(f"AI_RESPONSE: Completed. Generated {len(responses)} responses for room {self.room_id}")
+        return responses
+
+def handle_oracle_command(oracle_query, user_name, room_id):
+    """Handle Oracle database query commands"""
+    import subprocess
+    import threading
+    
+    def execute_oracle_query():
+        try:
+            logger.info(f"ORACLE: Executing query from {user_name}: {oracle_query}")
+            
+            # Execute oracle bridge command
+            result = subprocess.run([
+                'python', 'oracle_bridge.py', oracle_query
+            ], capture_output=True, text=True, timeout=60, cwd='..')
+            
+            if result.returncode == 0:
+                # Parse JSON response from oracle bridge
+                import json
+                try:
+                    oracle_data = json.loads(result.stdout)
+                    if oracle_data.get('success'):
+                        response_text = f"**Oracle Query Results** ({oracle_data.get('row_count', 0)} rows):\n\n"
+                        
+                        # Format results nicely
+                        results = oracle_data.get('results', [])
+                        if results:
+                            # Show first few results
+                            for i, row in enumerate(results[:5]):
+                                response_text += f"Row {i+1}: {row}\n"
+                            if len(results) > 5:
+                                response_text += f"\n... and {len(results) - 5} more rows"
+                        else:
+                            response_text += "No data found."
+                    else:
+                        response_text = f"**Oracle Error:** {oracle_data.get('error', 'Unknown error')}"
+                except json.JSONDecodeError:
+                    response_text = f"**Oracle Response:**\n{result.stdout}"
+            else:
+                response_text = f"**Oracle Error:** {result.stderr}"
+                
+        except subprocess.TimeoutExpired:
+            response_text = "**Oracle Timeout:** Query took longer than 60 seconds"
+        except Exception as e:
+            response_text = f"**Oracle Error:** {str(e)}"
+        
+        # Send Oracle response to chat
+        oracle_message = {
+            'sender': 'Oracle Database',
+            'sender_type': 'system',
+            'sender_id': 'oracle_system',
+            'message': response_text,
+            'room_id': room_id,
+            'timestamp': datetime.now().isoformat(),
+            'id': str(uuid.uuid4())
+        }
+        
+        # Add to room history and broadcast
+        if room_id in chat_rooms:
+            chat_rooms[room_id].add_message(oracle_message)
+        
+        socketio.emit('new_message', oracle_message, room=room_id)
+        logger.info(f"ORACLE: Sent response to room {room_id}")
+    
+    # Execute Oracle query in background thread
+    oracle_thread = threading.Thread(target=execute_oracle_query, daemon=True)
+    oracle_thread.start()
+
+@app.route('/')
+def index():
+    """Serve the main chat interface"""
+    return render_template('chat.html')
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    return {
+        'status': 'healthy',
+        'active_rooms': len(chat_rooms),
+        'active_sessions': len(active_sessions),
+        'timestamp': datetime.now().isoformat()
+    }
+
+@socketio.on('connect')
+def handle_connect():
+    """Handle new WebSocket connections"""
+    logger.info(f"Client connected: {request.sid}")
+    
+    # Send connection confirmation
+    emit('connection_status', {
+        'status': 'connected',
+        'session_id': request.sid,
+        'server_time': datetime.now().isoformat()
+    })
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle WebSocket disconnections"""
+    logger.info(f"Client disconnected: {request.sid}")
+    
+    # Clean up from any rooms
+    if request.sid in active_sessions:
+        room_id = active_sessions[request.sid]['room_id']
+        if room_id in chat_rooms:
+            chat_rooms[room_id].remove_participant(request.sid)
+        del active_sessions[request.sid]
+
+@socketio.on('join_room')
+def handle_join_room(data):
+    """Handle user joining a chat room"""
+    room_id = data.get('room_id', 'default')
+    user_name = data.get('user_name', 'Anonymous')
+    
+    logger.info(f"Join room request: {user_name} -> {room_id}")
+    
+    # Create room if it doesn't exist
+    if room_id not in chat_rooms:
+        chat_rooms[room_id] = ChatRoom(room_id)
+        logger.info(f"Created new room: {room_id}")
+        
+        # Don't auto-load personalities - let user choose them manually
+        if AI_PERSONALITIES_AVAILABLE:
+            logger.debug(f"JOIN_ROOM: AI personalities available for room {room_id}, but not auto-loading")
+        else:
+            logger.warning(f"JOIN_ROOM: AI personalities not available for room {room_id}")
+    
+    # Join the socket room
+    join_room(room_id)
+    
+    # Add to active sessions
+    active_sessions[request.sid] = {
+        'room_id': room_id,
+        'user_name': user_name,
+        'joined_at': datetime.now()
+    }
+    
+    # Add participant to chat room
+    chat_rooms[room_id].add_participant(request.sid, {
+        'name': user_name,
+        'socket_id': request.sid,
+        'type': 'human'  # vs 'ai' for personalities
+    })
+    
+    # Send room join confirmation
+    emit('room_joined', {
+        'room_id': room_id,
+        'user_name': user_name,
+        'participants': len(chat_rooms[room_id].participants),
+        'message_count': len(chat_rooms[room_id].messages)
+    })
+    
+    # Send recent message history
+    recent_messages = chat_rooms[room_id].get_messages()
+    if recent_messages:
+        emit('message_history', {'messages': recent_messages})
+    
+    # Notify other participants
+    emit('user_joined', {
+        'user_name': user_name,
+        'participant_count': len(chat_rooms[room_id].participants)
+    }, room=room_id, include_self=False)
+
+@socketio.on('leave_room')
+def handle_leave_room():
+    """Handle user leaving a chat room"""
+    if request.sid not in active_sessions:
+        return
+    
+    session = active_sessions[request.sid]
+    room_id = session['room_id']
+    user_name = session['user_name']
+    
+    logger.info(f"Leave room: {user_name} <- {room_id}")
+    
+    # Remove from room and session
+    leave_room(room_id)
+    if room_id in chat_rooms:
+        chat_rooms[room_id].remove_participant(request.sid)
+    del active_sessions[request.sid]
+    
+    # Notify other participants
+    emit('user_left', {
+        'user_name': user_name,
+        'participant_count': len(chat_rooms[room_id].participants) if room_id in chat_rooms else 0
+    }, room=room_id)
+
+@socketio.on('send_message')
+def handle_send_message(data):
+    """Handle incoming chat messages"""
+    try:
+        print(f"SEND_MESSAGE: Handler started - data: {data}")
+        logger.debug(f"SEND_MESSAGE: Handler called with data: {data}")
+        
+        print(f"SEND_MESSAGE: Checking active sessions for {request.sid}")
+        if request.sid not in active_sessions:
+            print(f"SEND_MESSAGE: Socket {request.sid} not in active sessions")
+            logger.warning(f"SEND_MESSAGE: Socket {request.sid} not in active sessions")
+            emit('error', {'message': 'Not in a chat room'})
+            return
+        
+        print(f"SEND_MESSAGE: Socket {request.sid} found in active sessions")
+        logger.debug(f"SEND_MESSAGE: Socket {request.sid} found in active sessions")
+    
+    except Exception as e:
+        print(f"SEND_MESSAGE: EXCEPTION in handler start: {e}")
+        logger.error(f"SEND_MESSAGE: EXCEPTION in handler start: {e}")
+        import traceback
+        print(f"SEND_MESSAGE: Traceback: {traceback.format_exc()}")
+        logger.error(f"SEND_MESSAGE: Traceback: {traceback.format_exc()}")
+        return
+    
+    session = active_sessions[request.sid]
+    room_id = session['room_id']
+    user_name = session['user_name']
+    message_text = data.get('message', '').strip()
+    
+    if not message_text:
+        return
+    
+    # Check for Oracle command
+    if message_text.startswith('/oracle '):
+        oracle_query = message_text[8:].strip()  # Remove '/oracle ' prefix
+        if oracle_query:
+            logger.info(f"Oracle command from {user_name}: {oracle_query}")
+            handle_oracle_command(oracle_query, user_name, room_id)
+        return
+    
+    safe_message = message_text[:50] + "..." if len(message_text) > 50 else message_text
+    logger.info(f"Message from {user_name} in {room_id}: {safe_message}")
+    
+    # Create message object
+    message = {
+        'sender': user_name,
+        'sender_type': 'human',
+        'sender_id': request.sid,
+        'message': message_text,
+        'room_id': room_id
+    }
+    
+    # Add to room history
+    if room_id in chat_rooms:
+        chat_rooms[room_id].add_message(message)
+    
+    # Broadcast to room
+    emit('new_message', message, room=room_id)
+    
+    # Phase 2: Get AI personality responses
+    if room_id in chat_rooms and AI_PERSONALITIES_AVAILABLE:
+        logger.debug(f"MESSAGE_HANDLER: Triggering AI response system for room {room_id}")
+        
+        def get_ai_responses_async():
+            """Get AI responses in a separate thread"""
+            thread_id = threading.current_thread().ident
+            logger.debug(f"AI_THREAD[{thread_id}]: Starting AI response thread for room {room_id}")
+            
+            try:
+                logger.debug(f"AI_THREAD[{thread_id}]: Sleeping 1 second to let user message appear first")
+                time.sleep(1)  # Brief delay to let user message appear first
+                
+                logger.debug(f"AI_THREAD[{thread_id}]: Calling get_ai_responses()")
+                ai_responses = chat_rooms[room_id].get_ai_responses(message_text, user_name)
+                
+                logger.info(f"AI_THREAD[{thread_id}]: Got {len(ai_responses)} AI responses to process")
+                
+                if not ai_responses:
+                    logger.warning(f"AI_THREAD[{thread_id}]: No AI responses generated for room {room_id}")
+                    return
+                
+                for i, ai_response in enumerate(ai_responses):
+                    logger.debug(f"AI_THREAD[{thread_id}]: Processing response {i+1}/{len(ai_responses)} from {ai_response['sender']}")
+                    
+                    # Add AI message to room history
+                    chat_rooms[room_id].add_message(ai_response)
+                    logger.debug(f"AI_THREAD[{thread_id}]: Added message to room history")
+                    
+                    # Send typing indicator first
+                    logger.debug(f"AI_THREAD[{thread_id}]: Sending typing indicator for {ai_response['sender']}")
+                    socketio.emit('user_typing', {
+                        'user_name': ai_response['sender'],
+                        'typing': True
+                    }, room=room_id)
+                    
+                    # Brief pause for typing effect
+                    logger.debug(f"AI_THREAD[{thread_id}]: Sleeping 2 seconds for typing effect")
+                    time.sleep(2)
+                    
+                    # Stop typing indicator
+                    logger.debug(f"AI_THREAD[{thread_id}]: Stopping typing indicator for {ai_response['sender']}")
+                    socketio.emit('user_typing', {
+                        'user_name': ai_response['sender'],
+                        'typing': False
+                    }, room=room_id)
+                    
+                    # Send AI response
+                    logger.debug(f"AI_THREAD[{thread_id}]: Sending AI message to room {room_id}")
+                    safe_message = safe_log_text(ai_response['message'], 100)
+                    logger.debug(f"AI_THREAD[{thread_id}]: Message content: '{safe_message}'")
+                    socketio.emit('new_message', ai_response, room=room_id)
+                    logger.info(f"AI_THREAD[{thread_id}]: Successfully sent message from {ai_response['sender']}")
+                    
+                    # Brief pause between multiple AI responses
+                    if len(ai_responses) > 1 and i < len(ai_responses) - 1:
+                        logger.debug(f"AI_THREAD[{thread_id}]: Sleeping 1 second between responses")
+                        time.sleep(1)
+                
+                logger.info(f"AI_THREAD[{thread_id}]: Completed processing all {len(ai_responses)} AI responses")
+                        
+            except Exception as e:
+                logger.error(f"AI_THREAD[{thread_id}]: Error generating AI responses: {e}")
+                import traceback
+                logger.debug(f"AI_THREAD[{thread_id}]: Exception traceback: {traceback.format_exc()}")
+        
+        # Start AI response generation in background thread
+        logger.debug(f"MESSAGE_HANDLER: Starting AI response thread for room {room_id}")
+        ai_thread = threading.Thread(target=get_ai_responses_async)
+        ai_thread.daemon = True
+        ai_thread.start()
+        logger.debug(f"MESSAGE_HANDLER: AI response thread started (daemon={ai_thread.daemon})")
+    else:
+        if room_id not in chat_rooms:
+            logger.warning(f"MESSAGE_HANDLER: Room {room_id} not found in chat_rooms")
+        if not AI_PERSONALITIES_AVAILABLE:
+            logger.warning(f"MESSAGE_HANDLER: AI personalities not available")
+    
+@socketio.on('typing_start')
+def handle_typing_start(data):
+    """Handle typing indicator start"""
+    if request.sid not in active_sessions:
+        return
+        
+    session = active_sessions[request.sid]
+    room_id = session['room_id']
+    user_name = session['user_name']
+    
+    emit('user_typing', {
+        'user_name': user_name,
+        'typing': True
+    }, room=room_id, include_self=False)
+
+@socketio.on('typing_stop')
+def handle_typing_stop(data):
+    """Handle typing indicator stop"""
+    if request.sid not in active_sessions:
+        return
+        
+    session = active_sessions[request.sid]
+    room_id = session['room_id']
+    user_name = session['user_name']
+    
+    emit('user_typing', {
+        'user_name': user_name,
+        'typing': False
+    }, room=room_id, include_self=False)
+
+@socketio.on('get_room_info')
+def handle_get_room_info():
+    """Get information about current room"""
+    if request.sid not in active_sessions:
+        emit('error', {'message': 'Not in a chat room'})
+        return
+    
+    session = active_sessions[request.sid]
+    room_id = session['room_id']
+    
+    if room_id in chat_rooms:
+        room = chat_rooms[room_id]
+        emit('room_info', {
+            'room_id': room_id,
+            'created_at': room.created_at.isoformat(),
+            'message_count': len(room.messages),
+            'participant_count': len(room.participants),
+            'participants': [p['name'] for p in room.participants.values()],
+            'ai_personalities': room.ai_personalities  # Empty for Phase 1
+        })
+
+@socketio.on('clear_chat')
+def handle_clear_chat():
+    """Handle clear chat request"""
+    if request.sid not in active_sessions:
+        return
+    
+    session = active_sessions[request.sid]
+    room_id = session['room_id']
+    user_name = session['user_name']
+    
+    logger.info(f"Clear chat request from {user_name} in room {room_id}")
+    
+    if room_id in chat_rooms:
+        # Clear message history
+        chat_rooms[room_id].messages = []
+        
+        # Notify all participants
+        emit('chat_cleared', {
+            'cleared_by': user_name,
+            'timestamp': datetime.now().isoformat()
+        }, room=room_id)
+        
+        logger.info(f"Chat cleared in room {room_id}")
+
+@socketio.on('add_personality')
+def handle_add_personality(data):
+    """Handle adding a personality to the room"""
+    if request.sid not in active_sessions:
+        emit('error', {'message': 'Not in a chat room'})
+        return
+    
+    session = active_sessions[request.sid]
+    room_id = session['room_id']
+    user_name = session['user_name']
+    personality_code = data.get('personality_code')
+    
+    logger.info(f"Add personality request: {personality_code} from {user_name} in room {room_id}")
+    
+    if not personality_code:
+        emit('error', {'message': 'No personality code provided'})
+        return
+    
+    if room_id not in chat_rooms:
+        emit('error', {'message': 'Room not found'})
+        return
+    
+    room = chat_rooms[room_id]
+    
+    # Try to add the personality
+    if room.add_ai_personality(personality_code):
+        # Get current personalities info for broadcast
+        personalities_info = []
+        if AI_PERSONALITIES_AVAILABLE:
+            try:
+                available = get_available_personalities()
+                for p in room.ai_personalities:
+                    personalities_info.append({
+                        'code_name': p.code_name,
+                        'name': p.display_name,
+                        'avatar': p.avatar,
+                        'specialty': p.specialty
+                    })
+            except Exception as e:
+                logger.error(f"Error getting personality info: {e}")
+        
+        # Broadcast personality addition to room
+        emit('personality_added', {
+            'personality_code': personality_code,
+            'added_by': user_name,
+            'active_personalities': personalities_info
+        }, room=room_id)
+        
+        # Send welcome message from the new personality
+        try:
+            new_personality = room.ai_personalities[-1]  # Get the just-added personality
+            welcome_msg = f"Hello! I'm {new_personality.display_name}. {new_personality.specialty}. Happy to join the conversation!"
+            
+            welcome_message = {
+                'sender': new_personality.display_name,
+                'sender_type': 'ai',
+                'sender_id': f'ai_{new_personality.code_name}',
+                'message': welcome_msg,
+                'room_id': room_id,
+                'personality_info': {
+                    'code_name': new_personality.code_name,
+                    'avatar': new_personality.avatar,
+                    'color': new_personality.message_color
+                }
+            }
+            
+            room.add_message(welcome_message)
+            emit('new_message', welcome_message, room=room_id)
+            
+        except Exception as e:
+            logger.error(f"Error sending welcome message: {e}")
+        
+        logger.info(f"Added personality {personality_code} to room {room_id}")
+    else:
+        emit('error', {'message': f'Could not add personality {personality_code}'})
+
+@socketio.on('remove_personality') 
+def handle_remove_personality(data):
+    """Handle removing a personality from the room"""
+    if request.sid not in active_sessions:
+        emit('error', {'message': 'Not in a chat room'})
+        return
+    
+    session = active_sessions[request.sid]
+    room_id = session['room_id']
+    user_name = session['user_name']
+    personality_code = data.get('personality_code')
+    
+    logger.info(f"Remove personality request: {personality_code} from {user_name} in room {room_id}")
+    
+    if not personality_code:
+        emit('error', {'message': 'No personality code provided'})
+        return
+    
+    if room_id not in chat_rooms:
+        emit('error', {'message': 'Room not found'})
+        return
+    
+    room = chat_rooms[room_id]
+    
+    # Find and remove the personality
+    removed_personality = None
+    for i, personality in enumerate(room.ai_personalities):
+        if personality.code_name == personality_code:
+            removed_personality = room.ai_personalities.pop(i)
+            break
+    
+    if removed_personality:
+        # Get current personalities info
+        personalities_info = []
+        if AI_PERSONALITIES_AVAILABLE:
+            try:
+                for p in room.ai_personalities:
+                    personalities_info.append({
+                        'code_name': p.code_name,
+                        'name': p.display_name,
+                        'avatar': p.avatar,
+                        'specialty': p.specialty
+                    })
+            except Exception as e:
+                logger.error(f"Error getting personality info: {e}")
+        
+        # Broadcast personality removal
+        emit('personality_removed', {
+            'personality_code': personality_code,
+            'removed_by': user_name,
+            'active_personalities': personalities_info
+        }, room=room_id)
+        
+        logger.info(f"Removed personality {personality_code} from room {room_id}")
+    else:
+        emit('error', {'message': f'Personality {personality_code} not found in room'})
+
+@socketio.on('get_available_personalities')
+def handle_get_available_personalities():
+    """Get list of all available personalities"""
+    if not AI_PERSONALITIES_AVAILABLE:
+        emit('available_personalities', {'personalities': []})
+        return
+    
+    try:
+        available = get_available_personalities()
+        personalities = []
+        
+        for code_name in available:
+            try:
+                # Get personality info from the working module
+                from chat_personalities_working import get_personality_info
+                info = get_personality_info(code_name)
+                if info:
+                    personalities.append({
+                        'code_name': info['code_name'],
+                        'name': info['name'],
+                        'specialty': info['specialty'],
+                        'model': info['primary_model']
+                    })
+            except Exception as e:
+                logger.error(f"Error getting info for personality {code_name}: {e}")
+                continue
+        
+        emit('available_personalities', {'personalities': personalities})
+        
+    except Exception as e:
+        logger.error(f"Error getting available personalities: {e}")
+        emit('available_personalities', {'personalities': []})
+
+# Phase 1 Error Handlers
+@app.errorhandler(404)
+def not_found(error):
+    return {'error': 'Page not found'}, 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"Internal error: {error}")
+    return {'error': 'Internal server error'}, 500
+
+if __name__ == '__main__':
+    print("Starting AI Council Chat Room Server...")
+    print("Server will be available at: http://localhost:5000")
+    print("Phase 2: AI personality integration active")
+    print("Available personalities: demo_guru, data_aware_template, personality_template")
+    print("-" * 60)
+    
+    # Run the server
+    socketio.run(
+        app, 
+        host='0.0.0.0',
+        port=5000, 
+        debug=True,
+        allow_unsafe_werkzeug=True  # For development only
+    )

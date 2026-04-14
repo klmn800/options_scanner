@@ -1,0 +1,18 @@
+PHASE 3: PATTERN DISCOVERY SUMMARY
+================================================================================
+
+Total Winners Analyzed: 449
+
+TOP 10 SYMBOLS:
+  F            18 (4.0%)
+  NLY          14 (3.1%)
+  DVN          14 (3.1%)
+  HPQ          11 (2.4%)
+  PCG          11 (2.4%)
+  PFE          10 (2.2%)
+  T            10 (2.2%)
+  VZ           10 (2.2%)
+  MPW          10 (2.2%)
+  MSFT          9 (2.0%)
+
+Top 5 symbols: 15.1% of winners

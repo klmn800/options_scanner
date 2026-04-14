@@ -1,0 +1,33 @@
+/* Morning View TUI Styles */
+
+/* Analysis result screen */
+#analysis-container {
+    width: 100%;
+    height: 100%;
+    background: $surface;
+}
+
+#analysis-scroll {
+    width: 100%;
+    height: 100%;
+    padding: 1 2;
+}
+
+#analysis-content {
+    width: 100%;
+    padding: 0 1;
+}
+
+/* Status bars */
+.status-bar {
+    height: 1;
+    background: $primary-background;
+    color: $text;
+    padding: 0 1;
+    margin-top: 1;
+}
+
+.inline-hint {
+    margin-top: 1;
+    padding: 0 1;
+}

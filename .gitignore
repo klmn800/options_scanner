@@ -1,0 +1,45 @@
+# Ignore large/binary/sensitive files
+data/*.db
+data/*.db-journal
+data/sector_archive/*.db
+data/health/__pycache__/
+cache/
+logs/
+python/
+__pycache__/
+*.pyc
+credentials.json
+gmail_token.json
+client_secret_*.json
+*.db-shm
+*.db-wal
+Deprecated/
+memory/
+
+# Sensitive config (contains API keys)
+config.json
+
+# Binaries
+claude.exe
+*.exe
+
+# Backups (large DB copies)
+backups/
+*.bak
+
+# OS files
+desktop.ini
+nul
+
+# Log files
+*.log
+oracle/oracle_logs/
+
+# Batchfix backups
+*.batchfix_backup_*.py
+
+# Autofix error queue (transient)
+autofix/errors/
+
+# Claude Code local settings
+.claude/
