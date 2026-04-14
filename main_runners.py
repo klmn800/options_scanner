@@ -12,6 +12,7 @@ Contains all run_* methods that execute individual pipelines:
 - run_metadata_collection: Symbol metadata refresh
 - run_earnings_pipeline: Earnings Intelligence daily
 - run_earnings_morning_scan: Arbitrage scanner
+- run_fm_baseline_update: Friday FM volume baseline recalculation
 - run_earnings_weekly_refresh: Friday calendar refresh
 - run_airline_play_phase: Airline tracking extraction
 - run_database_backup: Daily/weekly backup
@@ -53,6 +54,7 @@ from strategies.option_pipeline.op_main import OPOrchestrator
 from strategies.flow_monitor.fm_main import run_pre_market, run_market_hours, run_post_market
 from strategies.earnings_intel.ei_main import run_daily_pipeline
 from strategies.earnings_intel.ei_collector import EarningsCollector
+from strategies.flow_monitor.fm_baseline_generator import OptionBaselineGenerator
 # News collection is now handled inline by Flow Monitor via tools/news_sentiment.py
 # (Old 3-tier nc_main.py deprecated 2026-02-07)
 
@@ -1690,6 +1692,82 @@ class OrchestratorRunnersMixin:
                     calls_total, max(0, remaining)))
 
         self.create_status_box("\u2699\ufe0f SYSTEM PERFORMANCE", lines)
+
+    def run_fm_baseline_update(self):
+        """Run Flow Monitor baseline update (Fridays)
+
+        Recalculates option volume baselines for FM universe symbols using
+        21-day lookback of flow_options_scans data. Writes to symbol_baselines
+        table in production datalake.db.
+
+        Returns:
+            dict: {success, duration_seconds, symbols_processed, baselines_created,
+                   baselines_updated, error_count, failed_symbols}
+        """
+        self.create_status_box(
+            "FM BASELINE UPDATE",
+            [
+                "Mission: Recalculate option volume baselines for FM universe",
+                "Source: flow_options_scans (21-day lookback)",
+                "Target: symbol_baselines table (388 FM symbols)",
+                "Schedule: Friday before earnings refresh and sector archive"
+            ]
+        )
+
+        step_start = time.time()
+        try:
+            generator = OptionBaselineGenerator()
+            raw_result = generator.generate_baselines(lookback_days=21)
+            duration = time.time() - step_start
+
+            error_count = len(raw_result.get('errors', []))
+            result = {
+                'success': raw_result.get('symbols_processed', 0) > 0,
+                'duration_seconds': duration,
+                'symbols_processed': raw_result.get('symbols_processed', 0),
+                'baselines_created': raw_result.get('baselines_created', 0),
+                'baselines_updated': raw_result.get('baselines_updated', 0),
+                'error_count': error_count,
+                'failed_symbols': raw_result.get('errors', []),
+            }
+
+        except Exception as e:
+            duration = time.time() - step_start
+            logging.error("FM baseline generator crashed: {}".format(e))
+            result = {
+                'success': False,
+                'failure_reason': str(e),
+                'duration_seconds': duration,
+                'symbols_processed': 0,
+                'baselines_created': 0,
+                'baselines_updated': 0,
+                'error_count': 1,
+                'failed_symbols': [],
+            }
+
+        if result['success']:
+            self.create_status_box("FM BASELINE UPDATE COMPLETE", [
+                "Symbols processed: {}".format(result['symbols_processed']),
+                "Baselines created: {}".format(result['baselines_created']),
+                "Baselines updated: {}".format(result['baselines_updated']),
+                "Errors: {}".format(result['error_count']),
+                "Duration: {:.0f}s".format(result['duration_seconds']),
+            ])
+        else:
+            queue_error(
+                error_type='fm_baseline_update_error',
+                context={**result, 'performance_db': 'data/performance.db'},
+                severity='ERROR'
+            )
+            failure_reason = result.get('failure_reason', 'No symbols processed')
+            self.create_status_box("FM BASELINE UPDATE FAILED", [
+                "Error: {}".format(str(failure_reason)[:80]),
+                "Symbols processed: {}".format(result['symbols_processed']),
+                "Impact: Using existing baselines (volume surprise may be stale)",
+                "System: Continuing with Friday operations"
+            ], success=False)
+
+        return result
 
     def run_earnings_weekly_refresh(self):
         """Run Earnings Intelligence weekly refresh (Fridays)"""

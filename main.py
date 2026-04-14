@@ -537,19 +537,26 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
             results['5.1 Weekly Backup'] = self.run_database_backup(backup_type="weekly")
             step_durations['5.1 Weekly Backup'] = time.time() - _t0
 
-            # Step 5.2: Weekly Earnings Calendar Refresh
-            self.coffee_break(60, "Weekly backup complete - lock release before earnings refresh", after_step="Weekly Backup")
-            self.beautiful_log("Step 5.2: Earnings Calendar Refresh (Friday)", 'phase')
+            # Step 5.2: FM Baseline Update
+            self.coffee_break(60, "Weekly backup complete - lock release before baseline update", after_step="Weekly Backup")
+            self.beautiful_log("Step 5.2: FM Baseline Update (Friday)", 'phase')
             _t0 = time.time()
-            results['5.2 Earnings Refresh'] = self.run_earnings_weekly_refresh()
-            step_durations['5.2 Earnings Refresh'] = time.time() - _t0
+            results['5.2 FM Baseline'] = self.run_fm_baseline_update()
+            step_durations['5.2 FM Baseline'] = time.time() - _t0
 
-            # Step 5.3: Sector Archive Operations
-            self.coffee_break(60, "Earnings refresh complete - lock release before archive", after_step="Earnings Calendar Refresh")
-            self.beautiful_log("Step 5.3: Sector Archive Operations (Friday)", 'phase')
+            # Step 5.3: Weekly Earnings Calendar Refresh
+            self.coffee_break(60, "Baseline update complete - lock release before earnings refresh", after_step="FM Baseline Update")
+            self.beautiful_log("Step 5.3: Earnings Calendar Refresh (Friday)", 'phase')
             _t0 = time.time()
-            results['5.3 Sector Archive'] = self.run_friday_sector_archive()
-            step_durations['5.3 Sector Archive'] = time.time() - _t0
+            results['5.3 Earnings Refresh'] = self.run_earnings_weekly_refresh()
+            step_durations['5.3 Earnings Refresh'] = time.time() - _t0
+
+            # Step 5.4: Sector Archive Operations
+            self.coffee_break(60, "Earnings refresh complete - lock release before archive", after_step="Earnings Calendar Refresh")
+            self.beautiful_log("Step 5.4: Sector Archive Operations (Friday)", 'phase')
+            _t0 = time.time()
+            results['5.4 Sector Archive'] = self.run_friday_sector_archive()
+            step_durations['5.4 Sector Archive'] = time.time() - _t0
         else:
             self.beautiful_log("Phase 5: Weekly operations skipped (not Friday)", 'info')
 

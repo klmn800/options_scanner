@@ -8,7 +8,7 @@
 
 ## Overview
 
-14 tables. Every orchestrator step gets its own table with typed columns. No generic catch-all.
+16 tables. Every orchestrator step gets its own table with typed columns. No generic catch-all.
 Written once at end-of-day during **Phase 6: System Maintenance** — the final orchestrator
 phase, running after Phase 5 (Friday ops) on Fridays or after Phase 4 (evening ops) Mon-Thu.
 Data accumulates in-memory and `daily_state.json` throughout the day.
@@ -29,8 +29,10 @@ Data accumulates in-memory and `daily_state.json` throughout the day.
 | 12 | `airline_play_performance` | Airline symbol + options tracking | 1 |
 | 13 | `sector_archive_performance` | Friday sector archive | 0-1 |
 | 14 | `news_api_usage` | Alpha Vantage news API per-source breakdown | 1 |
+| 15 | `earnings_date_sources` | Per-symbol earnings date source tracking | ~780 |
+| 16 | `fm_baseline_performance` | FM volume baseline recalculation (Friday) | 0-1 |
 
-**Total:** ~50-55 rows/day, ~13,000 rows/year. Negligible size.
+**Total:** ~50-55 rows/day (plus ~780 earnings_date_sources rows on collection days). Negligible size.
 
 ---
 

@@ -6,7 +6,7 @@ User's name is Ben. Is he interested in pursuing anything from big-to-do-list.tx
 
 Your job is not to speculate. Its to find the correct answer, or admit when you don't know the answer. You must take that job seriously.
 
-**Commit reminder:** At the end of each session where code or docs were changed, ask Ben if he'd like to commit. Don't let changes pile up uncommitted — small, frequent commits are easier to track and recover from.
+**Commit reminder:** At the end of each session where code or docs were changed, ask Ben if he'd like to commit. Don't let changes pile up uncommitted — small, frequent commits are easier to track and safer to recover from.
 
 ---
 
@@ -211,7 +211,7 @@ AI agent framework for autonomous contract analysis. The Flow Tracker Agent moni
 
 ### Data Architecture
 - **SQLite Database**: `data/datalake.db` - central data repository
-- **Performance Database**: `data/performance.db` - operational metrics (15 tables, written end-of-day by Phase 6)
+- **Performance Database**: `data/performance.db` - operational metrics (16 tables, written end-of-day by Phase 6)
 - **Caching System**: Extensive caching in `cache/` directory
 - **API Integration**: Tradier for market data, Alpha Vantage for news sentiment, Gmail for inbox access, Claude for AI analysis
 - **Knowledge Base**: `memory/knowledge/` - AI-distilled facts from emails/newsletters, organized by topic (finance, trading, technology, instructions)
@@ -404,7 +404,7 @@ The autofix system (`tools/autofix.py`) provides automatic error recovery. When 
 - **Phase 2** (9:15 AM): Flow Monitor — pre-market tasks, market hours monitoring (~15-20 cycles), post-market analysis
 - **Phase 3** (5:00 PM): Evening — Option Pipeline, Airline Play, Final Sync
 - **Phase 4**: Evening ops — Daily Backup, Autofix Review
-- **Phase 5** (Fridays): Weekly Backup, Earnings Refresh, Sector Archive
+- **Phase 5** (Fridays): Weekly Backup, FM Baseline Update, Earnings Refresh, Sector Archive
 - **Phase 6**: System Maintenance — Performance Data Collection (writes `data/performance.db`)
 - **Execution**: Single daily cycle, launched by Task Scheduler every weekday. Holiday detection via Tradier API.
 
@@ -463,7 +463,7 @@ System maintains **two backup files** and **sector-based archives** for redundan
 - `tools/timezone_utils.py`: EST timezone utilities
 - `tools/log_utils.py`: Console output toolkit — `beautiful_log()`, `create_status_box()`, `phase_header()`, and all formatted output helpers. Everything flows through this so output reaches both console and `.log` files. See `docs/CONSOLE_DEVELOPER_GUIDE.md` for patterns.
 - `tools/decimal_formatter.py`: Database decimal formatting (MANDATORY)
-- `tools/performance_writer.py`: End-of-day performance data collection into `data/performance.db` (15 tables)
+- `tools/performance_writer.py`: End-of-day performance data collection into `data/performance.db` (16 tables)
 - `tools/news_sentiment.py`: News sentiment collection and enrichment (replaces `strategies/news_collector/`)
 - `tools/email_reader.py`: Gmail API inbox reader for klmn800alerts@gmail.com (OAuth2, full access)
 - `tools/email_digester.py`: Spawns Claude Code (Haiku) to extract knowledge from emails into `memory/knowledge/`
@@ -479,7 +479,7 @@ System maintains **two backup files** and **sector-based archives** for redundan
 
 ### Data Schema
 - `data/datalake_schema_2026-01-01.md`: Current database schema documentation
-- `docs/performance_tracking_enhancement/performance_db_schema.md`: Performance database schema (15 tables)
+- `docs/performance_tracking_enhancement/performance_db_schema.md`: Performance database schema (16 tables)
 - `data/sector_archive/README.md`: Sector archive design and routing logic
 - `data/sector_archive/MIGRATION_CHECKLIST.md`: Sector archive migration guide
 
@@ -504,7 +504,7 @@ System maintains **two backup files** and **sector-based archives** for redundan
 - **industry_peer_mappings**: Industry-based peer relationships (742 symbols, reference data)
 
 **Performance Database (`data/performance.db`)** — operational metrics, not trading data:
-- 15 tables tracking execution durations, sub-task breakdowns, item counts for every orchestrator step
+- 16 tables tracking execution durations, sub-task breakdowns, item counts for every orchestrator step
 - Written end-of-day by Phase 6 via `tools/performance_writer.py`
 - Schema reference: `docs/performance_tracking_enhancement/performance_db_schema.md`
 - Diagnostic queries: `autofix/reference/AUTOFIX_CHEAT_SHEET.md` (Performance Database section)
@@ -576,7 +576,7 @@ python tools/earnings_scenario.py "TOST|25|2026-04-17|CALL" --cost 1.04 --stradd
 - **Trading Style**: `docs/trading-style.md` - Ben's trading approach, constraints, and position management
 - **News Sentiment Design**: `docs/news_sentiment.md` - Architecture decisions, relevance weighting, API budget, deprecation history
 - **Earnings Intelligence Manual Operations**: `strategies/earnings_intel/docs/MANUAL_OPERATIONS.md` - Trading journal, SQL queries, and manual tasks
-- **Performance Database Schema**: `docs/performance_tracking_enhancement/performance_db_schema.md` - 13-table schema for `data/performance.db`
+- **Performance Database Schema**: `docs/performance_tracking_enhancement/performance_db_schema.md` - 16-table schema for `data/performance.db`
 - **Deprecation Notes**:
   - `Deprecated/chrome_extension/CHROME_EXTENSION_DEPRECATION.md` - Chrome extension (2025-10-14)
   - News Collector 3-tier system (2026-02-07) - replaced by `tools/news_sentiment.py`

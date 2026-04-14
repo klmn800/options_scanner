@@ -124,9 +124,11 @@ class OptionBaselineGenerator:
                 logging.error(error_msg)
                 results['errors'].append(error_msg)
         
-        # Show results summary
-        self._show_results_summary(results, test_mode)
-        
+        # Show results summary only in test/CLI mode (orchestrator owns completion display)
+        if test_mode:
+            self._show_results_summary(results, test_mode)
+
+        results['success'] = results['symbols_processed'] > 0
         return results
     
     def _get_all_symbols(self):

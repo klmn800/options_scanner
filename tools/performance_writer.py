@@ -418,6 +418,21 @@ def ensure_schema(db_path=None):
             )
         """)
 
+        # Table 16: fm_baseline_performance
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fm_baseline_performance (
+                trade_date          TEXT NOT NULL PRIMARY KEY,
+                day_of_week         INTEGER NOT NULL,
+                duration_seconds    REAL,
+                success             INTEGER NOT NULL,
+                symbols_processed   INTEGER,
+                baselines_created   INTEGER,
+                baselines_updated   INTEGER,
+                error_count         INTEGER DEFAULT 0,
+                recorded_at         TEXT NOT NULL
+            )
+        """)
+
         conn.commit()
         logger.info("Performance database schema verified: %s", db_path)
     finally:
@@ -710,7 +725,7 @@ def _write_ei_performance(cursor, trade_date, day_of_week, recorded_at,
 
     ei_mapping = {
         '1.2 Earnings Intelligence': 'daily_pipeline',
-        '5.2 Earnings Refresh': 'weekly_refresh',
+        '5.3 Earnings Refresh': 'weekly_refresh',
     }
 
     for step_name, run_type in ei_mapping.items():
@@ -1153,7 +1168,7 @@ def _write_subprocess_tables(cursor, trade_date, day_of_week, recorded_at,
         rows += 1
 
     # Table 13: sector_archive_performance
-    archive_result = results.get('5.3 Sector Archive')
+    archive_result = results.get('5.4 Sector Archive')
     if archive_result is not None and archive_result != 'skipped':
         parsed = {}
         if isinstance(archive_result, dict) and archive_result.get('stdout'):
@@ -1168,13 +1183,33 @@ def _write_subprocess_tables(cursor, trade_date, day_of_week, recorded_at,
             "total_rows_archived, total_rows_deleted, error_count, recorded_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (trade_date, day_of_week,
-             _r(step_durations.get('5.3 Sector Archive')),
+             _r(step_durations.get('5.4 Sector Archive')),
              _result_success(archive_result),
              parsed.get('tier1_rows_archived'), parsed.get('tier1_rows_deleted'),
              parsed.get('tier2_rows_archived'), parsed.get('tier2_rows_deleted'),
              parsed.get('tier3_rows_archived'), parsed.get('tier3_rows_deleted'),
              parsed.get('total_rows_archived'), parsed.get('total_rows_deleted'),
              parsed.get('error_count', 0),
+             recorded_at)
+        )
+        rows += 1
+
+    # Table 16: fm_baseline_performance
+    baseline_result = results.get('5.2 FM Baseline')
+    if baseline_result is not None and baseline_result != 'skipped':
+        cursor.execute(
+            "INSERT OR REPLACE INTO fm_baseline_performance "
+            "(trade_date, day_of_week, duration_seconds, success, "
+            "symbols_processed, baselines_created, baselines_updated, "
+            "error_count, recorded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (trade_date, day_of_week,
+             _r(step_durations.get('5.2 FM Baseline')),
+             _result_success(baseline_result),
+             baseline_result.get('symbols_processed') if isinstance(baseline_result, dict) else None,
+             baseline_result.get('baselines_created') if isinstance(baseline_result, dict) else None,
+             baseline_result.get('baselines_updated') if isinstance(baseline_result, dict) else None,
+             baseline_result.get('error_count', 0) if isinstance(baseline_result, dict) else 0,
              recorded_at)
         )
         rows += 1
