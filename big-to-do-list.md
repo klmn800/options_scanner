@@ -86,7 +86,7 @@ Started but not finished. Each has a clear next step.
 - **Next action:** Uncomment pre-earnings scanner after ~1-2 months of data (est. **May 2026**). Consider targeted symbol adds to `DAILY_ONLY` to flesh out sector/industry peers. Foundation for 1.4.
 
 ### 1.5 — Backfill earnings_moves
-- **Status:** IN PROGRESS (2026-04-13)
+- **Status:** DONE (2026-04-13)
 - **Root cause found:** `cleanup_tier3_production()` was deleting `earnings_events` and `historical_prices` from production after 90 days. Post-earnings calc couldn't find source data for Q3-Q4 2025 earnings because it had been purged.
 - **Fix applied (2026-04-13):** Added `skip_cleanup: True` to both tables in Tier 3 config. They still get COPIED to sector archives (DR), but no longer DELETED from production.
 - **Restoration tool:** `data/health/restore_from_archives.py` — copies 27K earnings_events + 665K historical_prices back from sector archives into production. INSERT OR IGNORE (idempotent). Run after main.py.
@@ -141,6 +141,18 @@ Started but not finished. Each has a clear next step.
 - Data shows intraday max averages ~1.8x the close-to-close move (10.44% vs 5.69%) across 5,604 rows with valid data.
 - **Prerequisites:** (1) Backfill earnings_moves (item 1.5) to fill 2025-2026 gaps and fix 4,322 rows where `max_intraday_move_pct = 0.0` (bug legacy defaults). (2) Verify how `_calculate_price_moves()` in `ei_post_earnings_calc.py` computes `max_intraday_move_pct` — confirm it's measuring peak deviation from previous close. (3) Consider that straddle expected move is priced to close, so comparing intraday historical vs close-based expected creates an apples-to-oranges issue.
 - **Decision needed:** Use intraday as signal driver (replacing close-to-close), as secondary display, or as a separate signal.
+
+#### 1.8 — IV Ramp Tracking for Earnings Watchlist
+- **Status:** Deferred — collecting data this quarter, build after earnings season (~Q3 2026).
+- **Goal:** Show how much IV has ramped so far vs. historical pattern, so Ben knows if it's "too late" to buy premium.
+- **Key finding (2026-04-14 audit):** `iv_front_month` is the right metric, NOT `iv_30dte`. Front-month captures earnings premium concentration; 30dte dampens the signal by blending expirations. DAL example: iv_30dte *declined* 15% into earnings while iv_front_month showed classic ramp-and-crush.
+- **Data available:** `earnings_snapshots` already collects `iv_front_month` + `iv_30dte` daily for T-7 to T+5. 136 symbols have 3+ pre-earnings snapshots. Sector archives have ~9 months of daily `option_symbol_summary` IV data for retroactive curve building.
+- **Proposed metrics:**
+  - `iv_ramp_pct`: current `iv_front_month` vs T-7 value (simple ramp measurement)
+  - IV term structure slope: `iv_front_month / iv_30dte` — values above 1.3-1.5x = earnings premium fully priced
+  - Per-symbol "typical ramp profile" computed from historical snapshots + archived `option_symbol_summary`
+- **Prerequisites:** ~50-100 more earnings events for meaningful per-symbol profiles. Data accumulating naturally through snapshot collector.
+- **No external data needed** — our own snapshots + archives are sufficient.
 
 #### 1.4 — Real-Time Earnings Signal Tracking
 - Wire FM to recompute straddle underpricing each cycle for symbols in `earnings_upcoming`.
