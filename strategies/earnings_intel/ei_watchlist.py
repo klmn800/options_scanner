@@ -62,6 +62,7 @@ def _create_table(cursor):
             historical_avg_move_pct REAL,
             straddle_expected_move_pct REAL,
             oi_balance_text TEXT,
+            vol_balance_text TEXT,
             alert_count_5d INTEGER,
             news_sentiment_label TEXT,
             news_sentiment_score REAL,
@@ -235,22 +236,45 @@ def _get_qualifying_symbols(cursor, today):
     return list(results.values())
 
 
+def _volume_balance_text(volume_put_call_ratio):
+    """Derive a text label from the put/call volume ratio.
+
+    Mirrors the OI balance text thresholds from op_symbol_rollup.py but
+    describes *volume* (today's trading activity) rather than OI
+    (accumulated positions).
+    """
+    if volume_put_call_ratio is None:
+        return None
+    if volume_put_call_ratio < 0.5:
+        return "Clear Call Vol"
+    elif volume_put_call_ratio < 0.77:
+        return "Heavy Call Vol"
+    elif volume_put_call_ratio <= 1.3:
+        return "Balanced Vol"
+    elif volume_put_call_ratio <= 1.9:
+        return "Heavy Put Vol"
+    else:
+        return "Clear Put Vol"
+
+
 def _pull_option_summary_data(cursor, symbols):
-    """Batch query option_symbol_summary for price, IV percentile, OI balance.
+    """Batch query option_symbol_summary for price, IV percentile, OI/vol balance.
 
     IV percentile may be NULL on today's row (needs 20+ days of history in
     the 30-day window — can fail near archive boundaries). Falls back to
     the previous trading day's value when today's is NULL.
 
     Returns:
-        dict: keyed by symbol -> {current_price, iv_percentile_30d, oi_balance_text}
+        dict: keyed by symbol -> {current_price, iv_percentile_30d,
+              oi_balance_text, vol_balance_text}
     """
     if not symbols:
         return {}
 
     placeholders = ",".join("?" * len(symbols))
     cursor.execute("""
-        SELECT symbol, close_price, symbol_iv_percentile_30d, oi_balance_text
+        SELECT symbol, close_price, symbol_iv_percentile_30d,
+               oi_balance_text, volume_put_call_ratio
         FROM option_symbol_summary
         WHERE trade_date = (SELECT MAX(trade_date) FROM option_symbol_summary)
           AND symbol IN ({})
@@ -263,6 +287,7 @@ def _pull_option_summary_data(cursor, symbols):
             "current_price": row[1],
             "iv_percentile_30d": row[2],
             "oi_balance_text": row[3],
+            "vol_balance_text": _volume_balance_text(row[4]),
         }
         if row[2] is None:
             missing_iv.append(row[0])
@@ -529,6 +554,7 @@ def populate_watchlist(db_path=None):
                 "historical_avg_move_pct": q.get("historical_avg_move_pct"),
                 "straddle_expected_move_pct": q.get("straddle_expected_move_pct"),
                 "oi_balance_text": opt.get("oi_balance_text"),
+                "vol_balance_text": opt.get("vol_balance_text"),
                 "alert_count_5d": None,
                 "news_sentiment_label": None,
                 "news_sentiment_score": None,
@@ -550,10 +576,11 @@ def populate_watchlist(db_path=None):
                         symbol, status, current_price, days_to_earnings, earnings_date,
                         earnings_time, earnings_play_signal, iv_percentile_30d,
                         relative_underpricing_pct, expected_move_pct, historical_avg_move_pct,
-                        straddle_expected_move_pct, oi_balance_text, alert_count_5d,
+                        straddle_expected_move_pct, oi_balance_text, vol_balance_text,
+                        alert_count_5d,
                         news_sentiment_label, news_sentiment_score, news_article_count,
                         first_appeared_date, created_at, last_updated
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     -- ON CONFLICT: deliberately omits 4 enrichment columns
                     -- (alert_count_5d, news_sentiment_*).
                     -- By excluding them from UPDATE SET, yesterday's enrichment
@@ -573,6 +600,7 @@ def populate_watchlist(db_path=None):
                         historical_avg_move_pct = excluded.historical_avg_move_pct,
                         straddle_expected_move_pct = excluded.straddle_expected_move_pct,
                         oi_balance_text = excluded.oi_balance_text,
+                        vol_balance_text = excluded.vol_balance_text,
                         last_updated = excluded.last_updated
                 """, (
                     cleaned["symbol"], cleaned["status"], cleaned.get("current_price"),
@@ -581,6 +609,7 @@ def populate_watchlist(db_path=None):
                     cleaned.get("iv_percentile_30d"), cleaned.get("relative_underpricing_pct"),
                     cleaned.get("expected_move_pct"), cleaned.get("historical_avg_move_pct"),
                     cleaned.get("straddle_expected_move_pct"), cleaned.get("oi_balance_text"),
+                    cleaned.get("vol_balance_text"),
                     cleaned.get("alert_count_5d"), cleaned.get("news_sentiment_label"),
                     cleaned.get("news_sentiment_score"), cleaned.get("news_article_count"),
                     cleaned["first_appeared_date"], cleaned["created_at"],
