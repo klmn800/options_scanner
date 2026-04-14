@@ -142,7 +142,7 @@ def format_database_values(data_dict, column_types=None):
         'symbol_exp_type_hash', 'last_evaluated_date', 'earnings_date', 'earnings_play_signal',
         'stdev_confidence', 'regime_classification', 'market_regime', 'market_direction', 'primary_signal',
         # Display strings and formatted text fields
-        'top_call_display', 'top_put_display', 'oi_balance_text', 'analysis_timestamp',
+        'top_call_display', 'top_put_display', 'oi_balance_text', 'vol_balance_text', 'analysis_timestamp',
         'top_call_hash', 'top_put_hash', 'top_call_expiration', 'top_put_expiration',
         'processing_duration_ms',
         # OI timing context fields (v_oi_timing_context view)
