@@ -1266,17 +1266,6 @@ class OrchestratorRunnersMixin:
             oi_str = _oi_abbrev.get(oi_raw, oi_raw[:8])
             sent = (row.get('news_sentiment_label') or '-')[:14]
 
-            # For post-earnings rows, show actual move instead of expected
-            if status in ('T+1', 'T+2', 'T+3'):
-                actual = row.get('actual_move_pct')
-                direction = row.get('move_direction', '')
-                crush = row.get('iv_crush_severity', '')
-                if actual is not None:
-                    exp_str = "{}{:.1f}%".format(
-                        "+" if direction == 'UP' else "-", abs(actual))
-                if crush:
-                    sent = crush[:14]
-
             print(trow([
                 (row.get('symbol') or '?')[:6],
                 status[:8], price_str, days_str, time_str,

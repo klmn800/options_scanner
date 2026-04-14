@@ -66,10 +66,6 @@ def _create_table(cursor):
             news_sentiment_label TEXT,
             news_sentiment_score REAL,
             news_article_count INTEGER,
-            actual_move_pct REAL,
-            move_direction TEXT,
-            iv_collapse_pct REAL,
-            iv_crush_severity TEXT,
             first_appeared_date TEXT NOT NULL,
             created_at TEXT NOT NULL,
             last_updated TEXT NOT NULL
@@ -289,109 +285,6 @@ def _pull_option_summary_data(cursor, symbols):
                 result[row[0]]["iv_percentile_30d"] = row[1]
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# Post-earnings enrichment
-# ---------------------------------------------------------------------------
-
-def _enrich_post_earnings(cursor, watchlist_rows, today):
-    """Compute actual_move_pct for post-earnings rows.
-
-    T+1 / T+2: calculated from historical_prices (pre-earnings close vs most
-    recent close).  T+3: pulled from earnings_moves if available, otherwise
-    calculated from historical_prices.
-
-    Returns:
-        dict: symbol -> {actual_move_pct, move_direction, [iv_collapse_pct, iv_crush_severity]}
-    """
-    enrichments = {}
-
-    for row_data in watchlist_rows:
-        symbol = row_data["symbol"]
-        status = row_data.get("status")
-        earnings_date = row_data.get("earnings_date")
-
-        if status in ("UPCOMING", "TODAY") or not earnings_date:
-            continue
-
-        if status in ("T+1", "T+2"):
-            try:
-                move = _calc_move_from_prices(cursor, symbol, earnings_date)
-                if move is not None:
-                    enrichments[symbol] = {
-                        "actual_move_pct": move,
-                        "move_direction": "UP" if move > 0 else "DOWN",
-                    }
-            except Exception as e:
-                logging.warning("   Post-earnings move calc failed for {}: {}".format(symbol, e))
-
-        elif status == "T+3":
-            try:
-                # Try earnings_moves first (has full T+3 data + IV metrics)
-                cursor.execute("""
-                    SELECT em.move_3day_pct, em.iv_collapse_pct, em.iv_crush_severity
-                    FROM earnings_moves em
-                    JOIN earnings_events ee ON em.event_id = ee.event_id
-                    WHERE ee.symbol = ? AND ee.earnings_date = ?
-                    ORDER BY em.calculated_at DESC LIMIT 1
-                """, (symbol, earnings_date))
-                move_row = cursor.fetchone()
-
-                if move_row and move_row[0] is not None:
-                    data = {
-                        "actual_move_pct": move_row[0],
-                        "move_direction": "UP" if move_row[0] > 0 else "DOWN",
-                    }
-                    if move_row[1] is not None:
-                        data["iv_collapse_pct"] = move_row[1]
-                    if move_row[2] is not None:
-                        data["iv_crush_severity"] = move_row[2]
-                    enrichments[symbol] = data
-                else:
-                    # Fallback: calculate from historical_prices
-                    move = _calc_move_from_prices(cursor, symbol, earnings_date)
-                    if move is not None:
-                        enrichments[symbol] = {
-                            "actual_move_pct": move,
-                            "move_direction": "UP" if move > 0 else "DOWN",
-                        }
-            except Exception as e:
-                logging.warning("   T+3 enrichment failed for {}: {}".format(symbol, e))
-
-    return enrichments
-
-
-def _calc_move_from_prices(cursor, symbol, earnings_date):
-    """Calculate actual move % from historical_prices.
-
-    Uses close on the trading day BEFORE earnings_date (pre-earnings close)
-    compared to the most recent available close.
-
-    Returns:
-        float or None: actual_move_pct, or None if data insufficient.
-    """
-    # Pre-earnings close: last trading day before earnings_date
-    cursor.execute("""
-        SELECT close_price FROM historical_prices
-        WHERE symbol = ? AND trade_date < ?
-        ORDER BY trade_date DESC LIMIT 1
-    """, (symbol, earnings_date))
-    pre_row = cursor.fetchone()
-
-    # Most recent close (at 7 AM this is yesterday's close)
-    cursor.execute("""
-        SELECT close_price FROM historical_prices
-        WHERE symbol = ?
-        ORDER BY trade_date DESC LIMIT 1
-    """, (symbol,))
-    recent_row = cursor.fetchone()
-
-    if (pre_row and recent_row
-            and pre_row[0] and recent_row[0]
-            and pre_row[0] != 0):
-        return (recent_row[0] - pre_row[0]) / pre_row[0] * 100
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -640,10 +533,6 @@ def populate_watchlist(db_path=None):
                 "news_sentiment_label": None,
                 "news_sentiment_score": None,
                 "news_article_count": None,
-                "actual_move_pct": None,
-                "move_direction": None,
-                "iv_collapse_pct": None,
-                "iv_crush_severity": None,
             }
 
             cleaned = clean_database_row(row)
@@ -663,22 +552,14 @@ def populate_watchlist(db_path=None):
                         relative_underpricing_pct, expected_move_pct, historical_avg_move_pct,
                         straddle_expected_move_pct, oi_balance_text, alert_count_5d,
                         news_sentiment_label, news_sentiment_score, news_article_count,
-                        actual_move_pct, move_direction, iv_collapse_pct, iv_crush_severity,
                         first_appeared_date, created_at, last_updated
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    -- ON CONFLICT: deliberately omits 8 enrichment columns
-                    -- (alert_count_5d, news_sentiment_*, actual_move_pct,
-                    -- move_direction, iv_collapse_pct, iv_crush_severity).
-                    -- The upsert builds rows with NULL for these columns.
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    -- ON CONFLICT: deliberately omits 4 enrichment columns
+                    -- (alert_count_5d, news_sentiment_*).
                     -- By excluding them from UPDATE SET, yesterday's enrichment
-                    -- values survive the upsert. The enrichment pass (_enrich_
-                    -- post_earnings, _enrich_flow_alerts, and news sub-step 5
-                    -- in ei_main.py) runs immediately after and overwrites with
-                    -- fresh data. If the enrichment pass fails, stale-but-present
-                    -- data is preserved instead of being NULLed out.
-                    -- Deviation from PRD 0008 Req 16 / Task 2.7 (which says
-                    -- "all columns except symbol, first_appeared_date, created_at").
-                    -- Accepted as intentional — see POST_REFACTOR_PUNCHLIST.md E-009.
+                    -- values survive the upsert. The enrichment pass
+                    -- (_enrich_flow_alerts, news sub-step 5 in ei_main.py)
+                    -- runs immediately after and overwrites with fresh data.
                     ON CONFLICT(symbol) DO UPDATE SET
                         status = excluded.status,
                         current_price = excluded.current_price,
@@ -686,7 +567,7 @@ def populate_watchlist(db_path=None):
                         earnings_date = excluded.earnings_date,
                         earnings_time = excluded.earnings_time,
                         earnings_play_signal = excluded.earnings_play_signal,
-                        iv_percentile_30d = excluded.iv_percentile_30d,
+                        iv_percentile_30d = COALESCE(excluded.iv_percentile_30d, earnings_watchlist.iv_percentile_30d),
                         relative_underpricing_pct = excluded.relative_underpricing_pct,
                         expected_move_pct = excluded.expected_move_pct,
                         historical_avg_move_pct = excluded.historical_avg_move_pct,
@@ -702,8 +583,6 @@ def populate_watchlist(db_path=None):
                     cleaned.get("straddle_expected_move_pct"), cleaned.get("oi_balance_text"),
                     cleaned.get("alert_count_5d"), cleaned.get("news_sentiment_label"),
                     cleaned.get("news_sentiment_score"), cleaned.get("news_article_count"),
-                    cleaned.get("actual_move_pct"), cleaned.get("move_direction"),
-                    cleaned.get("iv_collapse_pct"), cleaned.get("iv_crush_severity"),
                     cleaned["first_appeared_date"], cleaned["created_at"],
                     cleaned["last_updated"],
                 ))
@@ -714,18 +593,10 @@ def populate_watchlist(db_path=None):
 
         # ----- Enrichment pass (base data already committed) -----
         try:
-            post_enrichments = _enrich_post_earnings(cursor, watchlist_rows, today)
             flow_enrichments = _enrich_flow_alerts(cursor, symbol_list)
 
-            # Merge into one dict per symbol
-            all_enrichments = {}
-            for sym, data in post_enrichments.items():
-                all_enrichments.setdefault(sym, {}).update(data)
-            for sym, data in flow_enrichments.items():
-                all_enrichments.setdefault(sym, {}).update(data)
-
-            if all_enrichments:
-                _apply_enrichments(cursor, all_enrichments, now_ts)
+            if flow_enrichments:
+                _apply_enrichments(cursor, flow_enrichments, now_ts)
                 conn.commit()
         except Exception as e:
             logging.warning(

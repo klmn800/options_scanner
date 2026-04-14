@@ -487,7 +487,7 @@ System maintains **two backup files** and **sector-based archives** for redundan
 
 **Full schema reference:** `data/datalake_schema_2026-01-01.md` — complete table definitions, column lists, and indexes. Below are the tables with special usage notes or gotchas.
 
-- **flow_options_scans**: Intraday options scan data — the largest table (23M+ rows, ~100K rows/cycle). **Best near-live data source during market hours** — updated every FM cycle (~15-20x/day) with current bid/ask, IV, Greeks, volume, and OI for all FM-universe contracts. Query `datalake.db` (not query DB) for freshest data. Use for real-time position checks, IV monitoring, and intraday decision support. Archived via Tier 1 (15-day MOVE).
+- **flow_options_scans**: Intraday options scan data — the largest table (23M+ rows, ~100K rows/cycle). Updated every FM cycle (~15-20x/day). Archived via Tier 1 (15-day MOVE). **Use only when intra-day scan information is needed** (e.g., real-time position checks during market hours). For option-level data in analysis, reports, or enrichment pipelines, **prefer `option_contracts` or `option_symbol_summary`** — they have cleaner end-of-day snapshots with full Greeks, IV, volume, and OI for the entire KLMN universe (not just FM subset).
 - **flow_alerts**: Options flow alerts with profitability tracking
 - **flow_watchlist_daily**: Daily watchlist entries from flow alerts, with buy-the-dip detection and news sentiment enrichment (news_sentiment_score, news_sentiment_label, news_article_count — added Feb 2026)
 - **flow_symbol_summary**: Focused daily alert tracking for Flow Monitor (10 columns, selective population, Oct 16 2025 migration)
