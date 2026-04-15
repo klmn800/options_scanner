@@ -284,6 +284,7 @@ def _pull_option_summary_data(cursor, symbols):
 
     result = {}
     missing_iv = []
+    missing_vol = []
     current_front_month = {}
     for row in cursor.fetchall():
         result[row[0]] = {
@@ -297,6 +298,8 @@ def _pull_option_summary_data(cursor, symbols):
             current_front_month[row[0]] = row[5]
         if row[2] is None:
             missing_iv.append(row[0])
+        if row[4] is None:
+            missing_vol.append(row[0])
 
     # Backfill IV percentile from previous trading day if today's is NULL
     if missing_iv:
@@ -314,6 +317,24 @@ def _pull_option_summary_data(cursor, symbols):
         for row in cursor.fetchall():
             if row[0] in result:
                 result[row[0]]["iv_percentile_30d"] = row[1]
+
+    # Backfill volume ratio from previous trading day if today's is NULL
+    # (morning OP writes rows pre-market with no volume data yet)
+    if missing_vol:
+        ph_vol = ",".join("?" * len(missing_vol))
+        cursor.execute("""
+            SELECT symbol, volume_put_call_ratio
+            FROM option_symbol_summary
+            WHERE trade_date = (
+                SELECT MAX(trade_date) FROM option_symbol_summary
+                WHERE trade_date < (SELECT MAX(trade_date) FROM option_symbol_summary)
+            )
+              AND symbol IN ({})
+              AND volume_put_call_ratio IS NOT NULL
+        """.format(ph_vol), missing_vol)
+        for row in cursor.fetchall():
+            if row[0] in result:
+                result[row[0]]["vol_balance_text"] = _volume_balance_text(row[1])
 
     # 5-day front-month IV change (ramp indicator)
     if current_front_month:
