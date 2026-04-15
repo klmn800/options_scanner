@@ -204,10 +204,14 @@ class FMAlerts:
                 oc.created_at,
                 sb.volume_total_daily as normal_daily_volume,
                 sm.market_cap_category,
-                sm.is_etf
+                sm.is_etf,
+                oss.symbol_iv_percentile_30d as iv_percentile_30d
             FROM flow_options_scans oc
             LEFT JOIN symbol_baselines sb ON oc.symbol = sb.symbol
             LEFT JOIN symbol_metadata sm ON oc.symbol = sm.symbol
+            LEFT JOIN option_symbol_summary oss
+                ON oc.symbol = oss.symbol
+                AND oss.trade_date = (SELECT MAX(trade_date) FROM option_symbol_summary)
             WHERE oc.scan_timestamp = ?
                 AND oc.significance_score >= 3.5
                 AND oc.dte >= 7
@@ -391,42 +395,47 @@ class FMAlerts:
         last_price = alert.get('last_price', 0)
         underlying_price = alert.get('underlying_price', 0)
         iv = alert.get('implied_volatility', 0)
+        ivp = alert.get('iv_percentile_30d')
         score = alert.get('significance_score', 0)
         flow_pct = alert.get('flow_percentage', 0)
         dte = alert.get('days_to_expiration', 0)
         volume_surprise = alert.get('volume_surprise_factor', 0)
         market_cap = alert.get('market_cap_category', 'unknown')
-        
+
         # Calculate volume/OI ratio
         vol_oi_ratio = volume / max(oi, 1)
-        
+
         # Format volume with context
         if volume_surprise > 0:
             vol_context = "{:,} ({:.1f}x)".format(volume, volume_surprise)
         else:
             vol_context = "{:,}".format(volume)
-        
+
         # Format IV as percentage
         iv_pct = iv * 100 if iv else 0
-        
+
+        # Format IV percentile
+        ivp_str = "{:.0f}".format(ivp) if ivp is not None else "--"
+
         # Create alert line with pricing data - FIX: Handle None market_cap
-        market_cap_display = (market_cap[:3].upper() 
-                             if market_cap and market_cap != 'unknown' 
+        market_cap_display = (market_cap[:3].upper()
+                             if market_cap and market_cap != 'unknown'
                              else 'UNK')
-        
-        alert_line = "{} [{}] ${} {}s ({}d) | Vol: {} | OI: {:,} | V/OI: {:.1f} | Last: ${:.2f} | Underlying: ${:.2f} | IV: {:.0f}% | Score: {:.1f} | Flow: {:.1f}%".format(
-            symbol, 
-            market_cap_display, 
-            strike, 
-            option_type, 
-            dte, 
-            vol_context, 
-            oi, 
-            vol_oi_ratio, 
-            last_price, 
-            underlying_price, 
-            iv_pct, 
-            score, 
+
+        alert_line = "{} [{}] ${} {}s ({}d) | Vol: {} | OI: {:,} | V/OI: {:.1f} | Last: ${:.2f} | Underlying: ${:.2f} | IV: {:.0f}% | IVP: {} | Score: {:.1f} | Flow: {:.1f}%".format(
+            symbol,
+            market_cap_display,
+            strike,
+            option_type,
+            dte,
+            vol_context,
+            oi,
+            vol_oi_ratio,
+            last_price,
+            underlying_price,
+            iv_pct,
+            ivp_str,
+            score,
             flow_pct
         )
         
@@ -526,6 +535,7 @@ class FMAlerts:
             '<th>Last</th>',
             '<th>Underlying</th>',
             '<th>IV</th>',
+            '<th>IVP</th>',
             '<th>Score</th>',
             '<th>Flow %</th>',
             '<th>Level</th>',
@@ -554,7 +564,8 @@ class FMAlerts:
             underlying_price = alert.get('underlying_price', 0)
             iv = alert.get('implied_volatility', 0)
             iv_pct = iv * 100 if iv else 0
-            
+            ivp = alert.get('iv_percentile_30d')
+
             row = '<tr style="{}">'.format(row_style)
             row += '<td>{}</td>'.format(alert.get('symbol', ''))
             row += '<td>${}</td>'.format(alert.get('strike', ''))
@@ -566,6 +577,7 @@ class FMAlerts:
             row += '<td>${:.2f}</td>'.format(last_price)
             row += '<td>${:.2f}</td>'.format(underlying_price)
             row += '<td>{:.0f}%</td>'.format(iv_pct)
+            row += '<td>{}</td>'.format("{:.0f}".format(ivp) if ivp is not None else "--")
             row += '<td>{:.1f}</td>'.format(alert.get('significance_score', 0))
             row += '<td>{:.1f}%</td>'.format(alert.get('flow_percentage', 0))
             row += '<td>{}</td>'.format(level)
@@ -788,6 +800,9 @@ class FMAlerts:
                     
                     # Scan timing
                     'scan_interval_seconds': scan_interval_seconds,
+
+                    # IV context
+                    'iv_percentile_30d': alert.get('iv_percentile_30d'),
 
                     # Metadata
                     'alert_sent': True,

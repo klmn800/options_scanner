@@ -51,7 +51,25 @@ class FlowMonitorStorage:
         """Initialize storage with database path"""
         self.datalake_path = config.database_path
         logging.debug("FlowMonitorStorage initialized with datalake: {}".format(self.datalake_path))
+        self._ensure_schema()
         
+    def _ensure_schema(self):
+        """Add columns that may not exist yet (idempotent migrations)."""
+        migrations = [
+            "ALTER TABLE flow_alerts ADD COLUMN iv_percentile_30d REAL",
+        ]
+        try:
+            conn = sqlite3.connect(self.datalake_path)
+            for sql in migrations:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logging.debug("Schema migration check: {}".format(e))
+
     def get_connection(self):
         """Return database connection with WAL mode and tuned page cache
 
@@ -347,8 +365,9 @@ class FlowMonitorStorage:
                     days_to_max_prof, peak_hour_est,
                     max_loss_1d_pct, max_loss_3d_pct, max_loss_7d_pct, max_loss_14d_pct, max_loss_30d_pct,
                     days_to_max_loss, evaluation_status, final_quality_score, last_evaluated_date,
-                    contract_hash, scan_interval_seconds
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    contract_hash, scan_interval_seconds,
+                    iv_percentile_30d
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             '''
             
             # Clean all decimal values using our formatter
@@ -402,7 +421,8 @@ class FlowMonitorStorage:
                     alert_data.get('expiration_date', ''),
                     alert_data.get('option_type', '').upper()
                 ),
-                cleaned_data.get('scan_interval_seconds')
+                cleaned_data.get('scan_interval_seconds'),
+                cleaned_data.get('iv_percentile_30d')
             )
             
             cursor.execute(insert_sql, values)

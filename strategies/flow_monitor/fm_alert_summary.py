@@ -54,7 +54,7 @@ class FMAlertSummary:
             return storage.query_with_params(
                 """SELECT symbol, option_type, moneyness, significance_score,
                           premium_value, dte, expiration_date, iv, underlying_price,
-                          alert_timestamp, scan_timestamp
+                          alert_timestamp, scan_timestamp, iv_percentile_30d
                    FROM flow_alerts
                    WHERE trade_date = ?
                    ORDER BY scan_timestamp, alert_timestamp""",
@@ -124,6 +124,7 @@ class FMAlertSummary:
                     'total_premium': 0.0,
                     'iv_sum': 0.0,
                     'iv_count': 0,
+                    'iv_percentile': None,
                     'latest_price': None,
                     'expirations': Counter(),
                     'min_dte': None,
@@ -159,6 +160,11 @@ class FMAlertSummary:
             if iv is not None and iv > 0:
                 s['iv_sum'] += iv
                 s['iv_count'] += 1
+
+            # IV Percentile (symbol-level, keep latest non-null)
+            ivp = row.get('iv_percentile_30d')
+            if ivp is not None:
+                s['iv_percentile'] = ivp
 
             # Price (keep latest by row order — rows are ordered by scan_timestamp, alert_timestamp)
             price = row.get('underlying_price')
@@ -257,6 +263,12 @@ class FMAlertSummary:
             if s['iv_count'] > 0:
                 avg_iv = (s['iv_sum'] / s['iv_count']) * 100
                 parts.append("IV {:.0f}%".format(avg_iv))
+            else:
+                parts.append("      ")
+
+            # IV Percentile
+            if s['iv_percentile'] is not None:
+                parts.append("IVP {:.0f}".format(s['iv_percentile']))
             else:
                 parts.append("      ")
 

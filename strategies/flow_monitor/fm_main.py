@@ -612,7 +612,8 @@ def log_diagnostic_summary(diag_logger, storage, scan_timestamp, symbols_attempt
         # Get actual alerts for display (limit to HIGH conviction)
         alert_details_query = """
             SELECT symbol, strike, option_type, expiration_date, significance_score,
-                   volume, open_interest, last_price, underlying_price, iv
+                   volume, open_interest, last_price, underlying_price, iv,
+                   iv_percentile_30d
             FROM flow_alerts
             WHERE scan_timestamp = ? AND significance_score >= 5.0
             ORDER BY significance_score DESC
@@ -632,11 +633,14 @@ def log_diagnostic_summary(diag_logger, storage, scan_timestamp, symbols_attempt
                 premium = alert['volume'] * alert['last_price'] * 100 if alert['volume'] and alert['last_price'] else 0
                 vol_oi_ratio = alert['volume'] / alert['open_interest'] if alert['open_interest'] and alert['open_interest'] > 0 else 0
 
+                ivp = alert['iv_percentile_30d']
+                ivp_str = "{:.0f}".format(ivp) if ivp is not None else "--"
+
                 diag_logger.info(
                     f"[{scan_timestamp}] ALERT: {alert['symbol']} ${alert['strike']} {alert['option_type']}s "
                     f"({alert['expiration_date']}) | Score: {alert['significance_score']:.1f} | "
                     f"Vol: {alert['volume']:,} | V/OI: {vol_oi_ratio:.1f} | "
-                    f"Premium: ${premium:,.0f} | IV: {alert['iv']:.0f}%"
+                    f"Premium: ${premium:,.0f} | IV: {alert['iv']:.0f}% | IVP: {ivp_str}"
                 )
 
     except Exception as e:
@@ -1060,13 +1064,15 @@ def _display_resolution_details(details, today_date):
         alert_date = _fmt_date(detail.get('alert_date', ''))
         today = _fmt_date(today_date)
 
-        # Header line: NVDA $140C 03/21                    (x2) ▲ BUILDING  Score: 7.10
+        # Header line: NVDA $140C 03/21                    (x2) ▲ BUILDING  Score: 7.10  IVP: 75
         # Format strike: drop trailing .0 for round numbers (230.0 → 230, 62.5 → 62.5)
         strike_str = "{:g}".format(strike) if strike == int(strike) else "{:.2f}".format(strike)
         contract_label = "  {} ${}{} {}".format(symbol, strike_str, opt_type, exp)
         count_tag = "(x{}) ".format(alert_count) if alert_count > 1 else ""
         res_label = res_indicators.get(resolution, resolution)
-        right_side = "{}{}  Score: {:.2f}".format(count_tag, res_label, score)
+        ivp = detail.get('iv_percentile_30d')
+        ivp_tag = "  IVP: {:.0f}".format(ivp) if ivp is not None else ""
+        right_side = "{}{}  Score: {:.2f}{}".format(count_tag, res_label, score, ivp_tag)
         # Pad contract label to align right side
         gap = max(1, 72 - len(contract_label) - len(right_side))
         _out(contract_label + " " * gap + right_side)

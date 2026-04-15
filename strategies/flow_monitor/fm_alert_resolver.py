@@ -287,6 +287,7 @@ def resolve_yesterday_alerts(trade_date, fm_storage, op_storage):
                 'alert_vol': alert_volume,
                 'alert_iv': alert.get('iv'),
                 'alert_last': alert.get('last_price'),
+                'iv_percentile_30d': alert.get('iv_percentile_30d'),
                 # Today fields
                 'today_ul': contract_result[0].get('underlying_price'),
                 'today_oi': next_day_oi,
