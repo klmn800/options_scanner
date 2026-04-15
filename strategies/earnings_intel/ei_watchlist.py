@@ -63,6 +63,7 @@ def _create_table(cursor):
             straddle_expected_move_pct REAL,
             oi_balance_text TEXT,
             vol_balance_text TEXT,
+            iv_front_month_change_5d REAL,
             alert_count_5d INTEGER,
             news_sentiment_label TEXT,
             news_sentiment_score REAL,
@@ -258,7 +259,8 @@ def _volume_balance_text(volume_put_call_ratio):
 
 
 def _pull_option_summary_data(cursor, symbols):
-    """Batch query option_symbol_summary for price, IV percentile, OI/vol balance.
+    """Batch query option_symbol_summary for price, IV percentile, OI/vol balance,
+    and 5-day front-month IV change.
 
     IV percentile may be NULL on today's row (needs 20+ days of history in
     the 30-day window — can fail near archive boundaries). Falls back to
@@ -266,7 +268,7 @@ def _pull_option_summary_data(cursor, symbols):
 
     Returns:
         dict: keyed by symbol -> {current_price, iv_percentile_30d,
-              oi_balance_text, vol_balance_text}
+              oi_balance_text, vol_balance_text, iv_front_month_change_5d}
     """
     if not symbols:
         return {}
@@ -274,7 +276,7 @@ def _pull_option_summary_data(cursor, symbols):
     placeholders = ",".join("?" * len(symbols))
     cursor.execute("""
         SELECT symbol, close_price, symbol_iv_percentile_30d,
-               oi_balance_text, volume_put_call_ratio
+               oi_balance_text, volume_put_call_ratio, iv_front_month
         FROM option_symbol_summary
         WHERE trade_date = (SELECT MAX(trade_date) FROM option_symbol_summary)
           AND symbol IN ({})
@@ -282,13 +284,17 @@ def _pull_option_summary_data(cursor, symbols):
 
     result = {}
     missing_iv = []
+    current_front_month = {}
     for row in cursor.fetchall():
         result[row[0]] = {
             "current_price": row[1],
             "iv_percentile_30d": row[2],
             "oi_balance_text": row[3],
             "vol_balance_text": _volume_balance_text(row[4]),
+            "iv_front_month_change_5d": None,
         }
+        if row[5] is not None:
+            current_front_month[row[0]] = row[5]
         if row[2] is None:
             missing_iv.append(row[0])
 
@@ -308,6 +314,26 @@ def _pull_option_summary_data(cursor, symbols):
         for row in cursor.fetchall():
             if row[0] in result:
                 result[row[0]]["iv_percentile_30d"] = row[1]
+
+    # 5-day front-month IV change (ramp indicator)
+    if current_front_month:
+        fm_symbols = list(current_front_month.keys())
+        ph3 = ",".join("?" * len(fm_symbols))
+        cursor.execute("""
+            SELECT symbol, iv_front_month
+            FROM option_symbol_summary
+            WHERE trade_date = (
+                SELECT DISTINCT trade_date FROM option_symbol_summary
+                ORDER BY trade_date DESC LIMIT 1 OFFSET 5
+            )
+              AND symbol IN ({})
+              AND iv_front_month IS NOT NULL
+        """.format(ph3), fm_symbols)
+        for row in cursor.fetchall():
+            sym, old_iv = row[0], row[1]
+            if sym in current_front_month and old_iv and old_iv > 0:
+                change = ((current_front_month[sym] - old_iv) / old_iv) * 100
+                result[sym]["iv_front_month_change_5d"] = round(change, 1)
 
     return result
 
@@ -555,6 +581,7 @@ def populate_watchlist(db_path=None):
                 "straddle_expected_move_pct": q.get("straddle_expected_move_pct"),
                 "oi_balance_text": opt.get("oi_balance_text"),
                 "vol_balance_text": opt.get("vol_balance_text"),
+                "iv_front_month_change_5d": opt.get("iv_front_month_change_5d"),
                 "alert_count_5d": None,
                 "news_sentiment_label": None,
                 "news_sentiment_score": None,
@@ -577,10 +604,10 @@ def populate_watchlist(db_path=None):
                         earnings_time, earnings_play_signal, iv_percentile_30d,
                         relative_underpricing_pct, expected_move_pct, historical_avg_move_pct,
                         straddle_expected_move_pct, oi_balance_text, vol_balance_text,
-                        alert_count_5d,
+                        iv_front_month_change_5d, alert_count_5d,
                         news_sentiment_label, news_sentiment_score, news_article_count,
                         first_appeared_date, created_at, last_updated
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     -- ON CONFLICT: deliberately omits 4 enrichment columns
                     -- (alert_count_5d, news_sentiment_*).
                     -- By excluding them from UPDATE SET, yesterday's enrichment
@@ -601,6 +628,7 @@ def populate_watchlist(db_path=None):
                         straddle_expected_move_pct = excluded.straddle_expected_move_pct,
                         oi_balance_text = excluded.oi_balance_text,
                         vol_balance_text = excluded.vol_balance_text,
+                        iv_front_month_change_5d = excluded.iv_front_month_change_5d,
                         last_updated = excluded.last_updated
                 """, (
                     cleaned["symbol"], cleaned["status"], cleaned.get("current_price"),
@@ -610,6 +638,7 @@ def populate_watchlist(db_path=None):
                     cleaned.get("expected_move_pct"), cleaned.get("historical_avg_move_pct"),
                     cleaned.get("straddle_expected_move_pct"), cleaned.get("oi_balance_text"),
                     cleaned.get("vol_balance_text"),
+                    cleaned.get("iv_front_month_change_5d"),
                     cleaned.get("alert_count_5d"), cleaned.get("news_sentiment_label"),
                     cleaned.get("news_sentiment_score"), cleaned.get("news_article_count"),
                     cleaned["first_appeared_date"], cleaned["created_at"],

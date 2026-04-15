@@ -1205,20 +1205,22 @@ class OrchestratorRunnersMixin:
         print("")
 
         # Column definitions: (header, width, align)
+        # Layout: identity → decision → signal components → context → directional
         cols = [
-            ("Sym",        6, "<"),
-            ("Status",     8, "<"),
-            ("Price",      8, ">"),
-            ("Days",       4, ">"),
-            ("Time",       4, "<"),
-            ("Signal",    10, "<"),
-            ("IV%",        5, ">"),
-            ("Undr%",      7, ">"),
-            ("ExpMv",      6, ">"),
-            ("OI Bal",     8, "<"),
-            ("Sentiment", 14, "<"),
+            ("Sym",      6, "<"),
+            ("Days",     4, ">"),
+            ("Time",     4, "<"),
+            ("Signal",  10, "<"),
+            ("Undr%",    7, ">"),
+            ("HistMv",   6, ">"),
+            ("StrdMv",   6, ">"),
+            ("IV%",      4, ">"),
+            ("IVΔ5d",    6, ">"),
+            ("Price",    8, ">"),
+            ("OI Bal",   8, "<"),
+            ("Vol Bal",  8, "<"),
         ]
-        # OI balance abbreviations (full values are 10-15 chars)
+        # Balance text abbreviations
         _oi_abbrev = {
             'Clear Call Bias': 'Clr Call',
             'Heavy Call': 'Hvy Call',
@@ -1226,6 +1228,13 @@ class OrchestratorRunnersMixin:
             'Leans Put': 'Lns Put',
             'Heavy Put': 'Hvy Put',
             'Clear Put Bias': 'Clr Put',
+        }
+        _vol_abbrev = {
+            'Clear Call Vol': 'Clr Call',
+            'Heavy Call Vol': 'Hvy Call',
+            'Balanced Vol': 'Balanced',
+            'Heavy Put Vol': 'Hvy Put',
+            'Clear Put Vol': 'Clr Put',
         }
         widths = [w for _, w, _ in cols]
 
@@ -1249,27 +1258,32 @@ class OrchestratorRunnersMixin:
         print(hline("\u2560", "\u256c", "\u2563"))
 
         for row in watchlist_symbols:
-            status = row.get('status', '?')
-            price = row.get('current_price')
-            price_str = "{:.2f}".format(price) if price else "-"
             days = row.get('days_to_earnings')
             days_str = "{}d".format(days) if days is not None else "-"
             time_str = (row.get('earnings_time') or '-')[:4]
             signal = (row.get('earnings_play_signal') or '-')[:10]
-            iv_pct = row.get('iv_percentile_30d')
-            iv_str = "{:.0f}".format(iv_pct) if iv_pct is not None else "-"
             undr = row.get('relative_underpricing_pct')
             undr_str = "{:.1f}%".format(undr) if undr is not None else "-"
-            exp_mv = row.get('expected_move_pct')
-            exp_str = "{:.1f}%".format(exp_mv) if exp_mv is not None else "-"
+            hist = row.get('historical_avg_move_pct')
+            hist_str = "{:.1f}%".format(hist) if hist is not None else "-"
+            strd = row.get('straddle_expected_move_pct')
+            strd_str = "{:.1f}%".format(strd) if strd is not None else "-"
+            iv_pct = row.get('iv_percentile_30d')
+            iv_str = "{:.0f}".format(iv_pct) if iv_pct is not None else "-"
+            iv_chg = row.get('iv_front_month_change_5d')
+            iv_chg_str = "{:+.0f}%".format(iv_chg) if iv_chg is not None else "-"
+            price = row.get('current_price')
+            price_str = "{:.2f}".format(price) if price else "-"
             oi_raw = row.get('oi_balance_text') or '-'
             oi_str = _oi_abbrev.get(oi_raw, oi_raw[:8])
-            sent = (row.get('news_sentiment_label') or '-')[:14]
+            vol_raw = row.get('vol_balance_text') or '-'
+            vol_str = _vol_abbrev.get(vol_raw, vol_raw[:8])
 
             print(trow([
                 (row.get('symbol') or '?')[:6],
-                status[:8], price_str, days_str, time_str,
-                signal, iv_str, undr_str, exp_str, oi_str, sent]))
+                days_str, time_str, signal, undr_str,
+                hist_str, strd_str, iv_str, iv_chg_str,
+                price_str, oi_str, vol_str]))
 
         # Bottom border
         print(hline("\u255a", "\u2569", "\u255d"))
