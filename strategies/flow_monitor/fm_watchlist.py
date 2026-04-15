@@ -815,33 +815,70 @@ def backfill_missing_news(storage):
             logging.debug("News backfill: no NULL-sentiment entries to fill")
             return stats
 
-        logging.info("News backfill: {} NULL-sentiment entries, {} budget remaining".format(
-            len(candidates), stats['budget_remaining']))
-
+        # Deduplicate by symbol — news API returns symbol-level sentiment (not date-specific),
+        # so one API call per symbol suffices. Group entry_dates by symbol, preserving
+        # highest-significance-first ordering for API priority.
+        symbol_dates = {}  # {symbol: [entry_date, ...]}
+        symbol_order = []  # preserves priority order
         for row in candidates:
+            sym = row['symbol']
+            if sym not in symbol_dates:
+                symbol_dates[sym] = []
+                symbol_order.append(sym)
+            symbol_dates[sym].append(row['entry_date'])
+
+        logging.info("News backfill: {} NULL-sentiment entries ({} unique symbols), {} budget remaining".format(
+            len(candidates), len(symbol_order), stats['budget_remaining']))
+
+        for sym in symbol_order:
             # Re-check budget each iteration
             budget = get_budget_status()
             stats['budget_remaining'] = budget.get('remaining', 0)
             if not budget.get('can_make_request', False):
-                stats['skipped_no_budget'] = len(candidates) - stats['backfilled'] - stats['failed']
+                stats['skipped_no_budget'] = len(symbol_order) - stats['backfilled'] - stats['failed']
                 break
 
-            sym = row['symbol']
-            entry_date = row['entry_date']
+            dates = symbol_dates[sym]
 
             try:
-                result = enrich_watchlist_symbol(sym, storage, av_client=av_client, entry_date=entry_date)
+                # One API call per symbol, targeting the first (most significant) entry_date
+                result = enrich_watchlist_symbol(sym, storage, av_client=av_client, entry_date=dates[0])
                 if result.get('success') and result.get('sentiment'):
                     stats['backfilled'] += 1
-                    logging.info("  {} ({}): backfilled".format(sym, entry_date))
+                    # Apply same sentiment to other entry_dates for this symbol
+                    if len(dates) > 1:
+                        sentiment = result['sentiment']
+                        for extra_date in dates[1:]:
+                            try:
+                                update_sql = """
+                                    UPDATE flow_watchlist_daily
+                                    SET news_sentiment_score = ?,
+                                        news_sentiment_label = ?,
+                                        news_article_count = ?
+                                    WHERE symbol = ? AND entry_date = ?
+                                """
+                                def _update_extra(conn, sql=update_sql, params=(
+                                    sentiment['news_sentiment_score'],
+                                    sentiment['news_sentiment_label'],
+                                    sentiment['news_article_count'],
+                                    sym, extra_date
+                                )):
+                                    conn.execute(sql, params)
+                                    conn.commit()
+                                    return True
+                                storage._execute_with_retry(_update_extra)
+                            except Exception as ue:
+                                logging.debug("  {} ({}): extra date update failed - {}".format(sym, extra_date, ue))
+                    date_str = ", ".join(dates) if len(dates) > 1 else dates[0]
+                    logging.info("  {} ({}): backfilled".format(sym, date_str))
                 elif result.get('success'):
                     stats['failed'] += 1
-                    logging.info("  {} ({}): no symbol-specific sentiment".format(sym, entry_date))
+                    logging.info("  {} ({}): no symbol-specific sentiment".format(sym, dates[0]))
                 else:
                     stats['failed'] += 1
-                    logging.info("  {} ({}): fetch failed".format(sym, entry_date))
+                    logging.info("  {} ({}): fetch failed".format(sym, dates[0]))
             except Exception as e:
-                logging.warning("  {} ({}): error - {}".format(sym, entry_date, e))
+                logging.warning("  {} ({}): error - {}".format(sym, dates[0], e))
                 stats['failed'] += 1
 
         # Update final budget
