@@ -43,3 +43,4 @@ autofix/errors/
 
 # Claude Code local settings
 .claude/
+plans/
