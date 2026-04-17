@@ -676,6 +676,23 @@ def create_disaster_backup(interactive=True):
         if schema_match:
             print("✅ Backup completed: {} in {:.1f} minutes".format(format_size(backup_size), duration / 60))
             logging.debug("Disaster backup completed successfully in {:.1f} minutes".format(duration / 60))
+
+            # Run ANALYZE on large tables to keep query optimizer statistics current.
+            # Without this, SQLite may choose wrong indexes (e.g. flow_options_scans
+            # queries using symbol index instead of scan_timestamp index = 75x slower).
+            try:
+                analyze_start = time.time()
+                analyze_tables = ['flow_options_scans', 'option_contracts', 'option_symbol_summary']
+                analyze_conn = sqlite3.connect(source)
+                for tbl in analyze_tables:
+                    analyze_conn.execute('ANALYZE {}'.format(tbl))
+                analyze_conn.commit()
+                analyze_conn.close()
+                analyze_elapsed = time.time() - analyze_start
+                print("ANALYZE completed: {} tables in {:.0f}s".format(len(analyze_tables), analyze_elapsed))
+            except Exception as analyze_err:
+                logging.warning("ANALYZE failed (non-critical): {}".format(analyze_err))
+
             return 0
         else:
             print()
