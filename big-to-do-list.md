@@ -125,6 +125,13 @@ Started but not finished. Each has a clear next step.
   - Log the removal with reason (acquired, merged, delisted, ticker change) for audit trail
 - Keeps the database clean of ghost data from symbols we no longer track.
 
+#### 8.3 — Automated Symbol Discovery (Future)
+- Scan IPO calendars, new options listings, or detect symbols appearing in Tradier data that aren't in our universe.
+- Suggest candidates for onboarding via end-of-day report or lifecycle review queue.
+- Human-initiated onboarding only — discovery just surfaces candidates, doesn't auto-add.
+- **Prerequisite:** 8.1 (onboarding tool) must exist first.
+- Brainstorm origin: symbol lifecycle management brainstorm session (2026-04-16).
+
 ### Earnings Strategy
 
 #### 1.2 — Straddle Tactics for Earnings Intel
