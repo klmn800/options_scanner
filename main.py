@@ -569,6 +569,12 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         results['6.1 Performance Collection'] = self.run_performance_collection(results, step_durations)
         step_durations['6.1 Performance Collection'] = time.time() - _t0
 
+        # Step 6.2: Symbol Health Check
+        self.beautiful_log("Step 6.2: Symbol Health Check", 'phase')
+        _t0 = time.time()
+        results['6.2 Symbol Health'] = self.run_symbol_health_check()
+        step_durations['6.2 Symbol Health'] = time.time() - _t0
+
         # ── Day-End Summary ──
         self._print_day_summary(results, day_start_time, step_durations)
 

@@ -1375,6 +1375,12 @@ class OrchestratorRunnersMixin:
         except Exception as e:
             self.beautiful_log("System performance section error: {}".format(e), 'warning')
 
+        try:
+            # ── Section 5: Symbol Health (conditional) ──
+            self._eod_symbol_health(results)
+        except Exception as e:
+            self.beautiful_log("Symbol health section error: {}".format(e), 'warning')
+
         if conn:
             conn.close()
 
@@ -1695,6 +1701,58 @@ class OrchestratorRunnersMixin:
                     calls_total, max(0, remaining)))
 
         self.create_status_box("\u2699\ufe0f SYSTEM PERFORMANCE", lines)
+
+    def _eod_symbol_health(self, results):
+        """Section 5: Symbol Health — only shown when there are warnings/suspects/changes."""
+        health = results.get('6.2 Symbol Health', {})
+        if not health or not health.get('success'):
+            return
+
+        if health.get('safety_gate_tripped'):
+            return  # Already warned during execution, don't repeat in report
+
+        warnings = health.get('warnings', [])
+        suspects = health.get('suspects', [])
+
+        # Also check for recent lifecycle events
+        recent_events = []
+        try:
+            from tools.lifecycle.audit import get_recent_events, get_default_db_path
+            recent_events = get_recent_events(get_default_db_path(), days=1)
+        except Exception:
+            pass
+
+        # Only show section if there's something to report
+        if not warnings and not suspects and not recent_events:
+            return
+
+        lines = []
+
+        if warnings:
+            lines.append("Warnings (3-4 days no data):")
+            for sym, last_date, days in warnings:
+                lines.append("  {}  last data: {}".format(sym, last_date or 'never'))
+
+        if suspects:
+            if lines:
+                lines.append("")
+            lines.append("Suspects (5+ days no data):")
+            for sym, last_date, days in suspects:
+                flagged = " [flagged]" if health.get('new_suspects_logged', 0) > 0 else ""
+                lines.append("  {}  last data: {}{}".format(sym, last_date or 'never', flagged))
+
+        if recent_events:
+            if lines:
+                lines.append("")
+            lines.append("Recent changes (last 24h):")
+            for evt in recent_events[:5]:
+                lines.append("  {} {} ({}) — {}".format(
+                    evt.get('symbol', '?'),
+                    evt.get('event_type', '?'),
+                    evt.get('operator', '?'),
+                    evt.get('reason', '')[:60]))
+
+        self.create_status_box("SYMBOL HEALTH", lines)
 
     def run_fm_baseline_update(self):
         """Run Flow Monitor baseline update (Fridays)
@@ -2653,3 +2711,74 @@ class OrchestratorRunnersMixin:
             self.beautiful_log("Performance collection failed (non-critical): {}".format(e), 'warning')
             logging.warning("Performance collection error: {}".format(traceback.format_exc()))
             return {'success': False, 'duration_seconds': perf_duration, 'error': str(e)}
+
+    def run_symbol_health_check(self):
+        """Run symbol health check and log suspects (Phase 6.2).
+
+        Queries option_contracts for symbols missing data, logs lifecycle
+        events for suspects (5+ days missing), and returns structured
+        results for the end-of-day report.
+
+        Returns:
+            dict: {'success': bool, 'warnings': list, 'suspects': list,
+                   'new_suspects_logged': int, 'safety_gate_tripped': bool}
+        """
+        health_start = time.time()
+        try:
+            from tools.lifecycle.health_check import run_health_check, log_suspects
+
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'datalake.db')
+            health_result = run_health_check(db_path)
+
+            if health_result['safety_gate_tripped']:
+                self.beautiful_log(
+                    "Health check skipped: {}".format(health_result['safety_gate_message']),
+                    'warning'
+                )
+                return {
+                    'success': True,
+                    'warnings': [],
+                    'suspects': [],
+                    'new_suspects_logged': 0,
+                    'safety_gate_tripped': True,
+                    'safety_gate_message': health_result['safety_gate_message'],
+                    'duration_seconds': time.time() - health_start,
+                }
+
+            # Log new suspects idempotently
+            new_logged = log_suspects(db_path, health_result)
+
+            warn_count = len(health_result['warnings'])
+            suspect_count = len(health_result['suspects'])
+            if warn_count or suspect_count:
+                self.beautiful_log(
+                    "Symbol health: {} warnings, {} suspects ({} newly logged)".format(
+                        warn_count, suspect_count, new_logged),
+                    'warning' if suspect_count else 'info'
+                )
+            else:
+                self.beautiful_log("Symbol health: all clear", 'info')
+
+            return {
+                'success': True,
+                'warnings': [(h.symbol, h.last_data_date, h.consecutive_missing_days)
+                             for h in health_result['warnings']],
+                'suspects': [(h.symbol, h.last_data_date, h.consecutive_missing_days)
+                             for h in health_result['suspects']],
+                'new_suspects_logged': new_logged,
+                'safety_gate_tripped': False,
+                'duration_seconds': time.time() - health_start,
+            }
+
+        except Exception as e:
+            self.beautiful_log("Symbol health check failed (non-critical): {}".format(e), 'warning')
+            logging.warning("Health check error: {}".format(traceback.format_exc()))
+            return {
+                'success': False,
+                'warnings': [],
+                'suspects': [],
+                'new_suspects_logged': 0,
+                'safety_gate_tripped': False,
+                'duration_seconds': time.time() - health_start,
+                'error': str(e),
+            }
