@@ -378,6 +378,7 @@ python tools/direct_db_query.py --multi "SELECT COUNT(*) FROM flow_alerts; SELEC
 - **Enhancement Protocol**: Always offer suggestions to take requests to the next level, but NEVER implement enhancements without explicit approval. Stick to the exact scope requested until user approves additional changes. However, you may push back on instructions if they would be harmful, cumbersome, follow worst practices, or be overly complicated.
 - **NO COP-OUT ANSWERS**: NEVER give up on solving technical problems or provide "that's good enough" responses when something clearly isn't working. Always debug thoroughly and find the actual root cause. If an UPDATE statement isn't working, investigate why instead of suggesting workarounds.
 - **FOLLOW INSTRUCTIONS EXACTLY**: When user gives specific values or instructions (e.g., "set all to 300"), implement EXACTLY what was requested. Do not improvise variations (300/350/400) or interpret creatively. If the instruction is unclear, ask for clarification. Do not second-guess explicit directives.
+- **Documentation on Delivery**: When completing a new feature or significant module, ensure it's discoverable by future agents and humans. Add a README in the feature directory, add CLI usage to the Common Commands section of this file, add key files to the Key Files section, and update any relevant architecture notes. Documentation is part of "done".
 
 ### Autofix Integration
 
