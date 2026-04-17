@@ -239,10 +239,17 @@ def prompt_archive_db(sector, industry):
         if not prompt_yes_no(f'"{name}.db" doesn\'t exist. Create it?', default='n'):
             continue
 
-        # Create the archive
+        # Create the archive (suppress library logging noise)
         try:
+            import logging
             from data.health.create_sector_archive import create_sector_archive
-            result = create_sector_archive(name, copy_reference=False, dry_run=False)
+            logger = logging.getLogger()
+            prev_level = logger.level
+            logger.setLevel(logging.WARNING)
+            try:
+                result = create_sector_archive(name, copy_reference=False, dry_run=False)
+            finally:
+                logger.setLevel(prev_level)
             if result == 0:
                 print(f'  Created data/sector_archive/{name}.db')
                 return name

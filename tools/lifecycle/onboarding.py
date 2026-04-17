@@ -304,7 +304,7 @@ def _step_backfill_earnings(symbol, db_path):
             return 'fail  (no Tradier token)'
 
         # Fetch and insert earnings events for this symbol
-        events = phase1_fetch_events(token, [symbol], batch_size=50)
+        events, _stats = phase1_fetch_events(token, [symbol], batch_size=50)
         if not events:
             return 'done  (0 events from Tradier)'
 
@@ -374,9 +374,16 @@ def _step_generate_baseline(symbol, tier, db_path):
         return 'skip  (daily_only tier)'
 
     try:
+        import logging
         from strategies.flow_monitor.fm_baseline_generator import OptionBaselineGenerator
-        gen = OptionBaselineGenerator()
-        gen.generate_baselines(symbols=[symbol])
+        logger = logging.getLogger()
+        prev_level = logger.level
+        logger.setLevel(logging.WARNING)
+        try:
+            gen = OptionBaselineGenerator()
+            gen.generate_baselines(symbols=[symbol])
+        finally:
+            logger.setLevel(prev_level)
         return 'done'
     except Exception as e:
         return f'fail  ({e})'
