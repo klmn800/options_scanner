@@ -180,6 +180,9 @@ def restore_symbol(symbol, db_path):
         ('fm_universe', 'FM_UNIVERSE  (full intraday scan)'),
         ('daily_only', 'DAILY_ONLY   (OP/EI only)'),
     ])
+    if tier is None:
+        print('Cancelled.')
+        return
 
     today = now_eastern().strftime('%Y-%m-%d')
 

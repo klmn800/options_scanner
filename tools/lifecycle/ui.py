@@ -49,15 +49,21 @@ def display_symbol_card(symbol, data):
 
     opt_str = f'YES ({len(expirations)} expirations)' if expirations else 'NO'
 
+    vol_source = data.get('avg_volume_source')
+    vol_label = "today's volume" if vol_source == 'today' else '20d avg'
+    next_earnings = data.get('next_earnings')
+
     header = f'{symbol} — {name}'
     print(f'\n{"=" * 3} {header} {"=" * 3}')
     print(f'  Sector:         {sector}')
     print(f'  Industry:       {industry}')
     print(f'  Market Cap:     {cap_str}')
-    print(f'  Avg Volume:     {vol_str} (20d)')
+    print(f'  Avg Volume:     {vol_str} ({vol_label})')
     print(f'  Last Price:     ${last_price:.2f}' if last_price else '  Last Price:     N/A')
     print(f'  Optionable:     {opt_str}')
     print(f'  Last Earnings:  {last_earnings}')
+    if next_earnings:
+        print(f'  Next Earnings:  {next_earnings}')
 
 
 def display_preflight_results(results):
@@ -100,8 +106,8 @@ def prompt_yes_no(message, default='y'):
     try:
         answer = input(f'\n{message} {hint}: ').strip().lower()
     except (EOFError, KeyboardInterrupt):
-        print()
-        return default == 'y'
+        print('\nCancelled.')
+        return False
 
     if not answer:
         return default == 'y'
@@ -126,8 +132,8 @@ def prompt_choice(message, options):
         try:
             answer = input(f'Choice [1-{len(options)}]: ').strip()
         except (EOFError, KeyboardInterrupt):
-            print()
-            return options[0][0]  # Default to first option
+            print('\nCancelled.')
+            return None
 
         try:
             idx = int(answer) - 1
@@ -152,3 +158,96 @@ def prompt_text(message):
     except (EOFError, KeyboardInterrupt):
         print()
         return ''
+
+
+def prompt_archive_db(sector, industry):
+    """Interactive archive database picker.
+
+    Scans data/sector_archive/ for existing .db files, suggests a default
+    based on sector/industry, and displays a numbered grid. User can pick
+    a number or type a new name (which triggers creation prompt).
+
+    Args:
+        sector: Symbol's sector (e.g. 'Industrials')
+        industry: Symbol's industry (e.g. 'Aerospace & Defense')
+
+    Returns:
+        str or None: Archive DB name (without .db), or None if cancelled
+    """
+    from tools.lifecycle.routing import determine_archive_db
+
+    archive_dir = os.path.join(project_root, 'data', 'sector_archive')
+    archives = sorted([f[:-3] for f in os.listdir(archive_dir) if f.endswith('.db')])
+
+    if not archives:
+        print('No archive databases found in data/sector_archive/')
+        return prompt_text('Enter archive DB name (without .db)') or None
+
+    # Get suggested default
+    suggested = determine_archive_db(sector, industry)
+
+    print(f'\nArchive routing for {sector} / {industry}:')
+    print()
+
+    # Display in 3-column grid
+    cols = 3
+    col_width = 24
+    for row_start in range(0, len(archives), cols):
+        parts = []
+        for i in range(row_start, min(row_start + cols, len(archives))):
+            num = f'[{i + 1:>2}]'
+            name = archives[i]
+            marker = ' *' if name == suggested else ''
+            entry = f'{num} {name}{marker}'
+            parts.append(f'{entry:<{col_width}}')
+        print(f'  {"".join(parts)}')
+
+    if suggested:
+        print(f'\n  * = suggested default ({suggested})')
+
+    while True:
+        try:
+            hint = f' (Enter={suggested})' if suggested else ''
+            answer = input(f'\n  Choice [1-{len(archives)}] or new name{hint}: ').strip()
+        except (EOFError, KeyboardInterrupt):
+            print('\nCancelled.')
+            return None
+
+        # Enter = accept default
+        if not answer and suggested:
+            return suggested
+
+        # Number = pick from list
+        try:
+            idx = int(answer) - 1
+            if 0 <= idx < len(archives):
+                return archives[idx]
+            print(f'  Please enter 1-{len(archives)} or a new name')
+            continue
+        except ValueError:
+            pass
+
+        # Text = new archive name
+        name = answer.lower().replace(' ', '_').replace('.db', '')
+        if not name:
+            continue
+
+        if name in archives:
+            return name
+
+        # New name — confirm creation
+        if not prompt_yes_no(f'"{name}.db" doesn\'t exist. Create it?', default='n'):
+            continue
+
+        # Create the archive
+        try:
+            from data.health.create_sector_archive import create_sector_archive
+            result = create_sector_archive(name, copy_reference=False, dry_run=False)
+            if result == 0:
+                print(f'  Created data/sector_archive/{name}.db')
+                return name
+            else:
+                print(f'  Failed to create archive (exit code {result})')
+        except Exception as e:
+            print(f'  Failed to create archive: {e}')
+        continue

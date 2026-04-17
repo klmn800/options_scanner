@@ -24,20 +24,17 @@ import json
 import os
 import sqlite3
 import sys
-import logging
-from datetime import datetime
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from tools.timezone_utils import now_eastern
-from tools.lifecycle.routing import determine_archive_db, get_ambiguity_reason
 from tools.lifecycle.preflight import run_preflight_checks
 from tools.lifecycle.audit import log_lifecycle_event
 from tools.lifecycle.ui import (
     display_symbol_card, display_preflight_results, display_progress_step,
-    prompt_yes_no, prompt_choice, prompt_text,
+    prompt_yes_no, prompt_choice, prompt_archive_db,
 )
 
 
@@ -75,6 +72,7 @@ def fetch_symbol_info(symbol):
         'last_price': 0,
         'expirations': [],
         'last_earnings': 'N/A',
+        'next_earnings': None,
         'earnings_available': False,
         'quote_type': None,
         'errors': [],
@@ -96,7 +94,13 @@ def fetch_symbol_info(symbol):
             if isinstance(quote, list):
                 quote = quote[0] if quote else {}
             result['company_name'] = quote.get('description', 'Unknown')
-            result['avg_volume'] = quote.get('average_volume') or 0
+            avg_vol = quote.get('average_volume') or 0
+            if avg_vol == 0:
+                # Tradier returns 0 for some symbols despite active trading
+                avg_vol = quote.get('volume') or 0
+                if avg_vol:
+                    result['avg_volume_source'] = 'today'
+            result['avg_volume'] = avg_vol
             result['last_price'] = quote.get('last') or quote.get('close') or 0
             result['quote_type'] = quote.get('type', '')
         else:
@@ -177,11 +181,18 @@ def fetch_symbol_info(symbol):
                                     and e.get('event_type') in (7, 8, 9, 10)]
                         if earnings:
                             result['earnings_available'] = True
-                            # Most recent event
-                            sorted_events = sorted(earnings,
-                                key=lambda x: x.get('begin_date_time', ''), reverse=True)
-                            if sorted_events:
-                                result['last_earnings'] = sorted_events[0].get('begin_date_time', 'N/A')[:10]
+                            today_str = now_eastern().strftime('%Y-%m-%d')
+                            # Most recent PAST earnings + next future
+                            past = [e for e in earnings
+                                    if (e.get('begin_date_time', '') or '')[:10] <= today_str]
+                            future = [e for e in earnings
+                                      if (e.get('begin_date_time', '') or '')[:10] > today_str]
+                            if past:
+                                past.sort(key=lambda x: x.get('begin_date_time', ''), reverse=True)
+                                result['last_earnings'] = past[0].get('begin_date_time', 'N/A')[:10]
+                            if future:
+                                future.sort(key=lambda x: x.get('begin_date_time', ''))
+                                result['next_earnings'] = future[0].get('begin_date_time', 'N/A')[:10]
     except Exception as e:
         result['errors'].append(f'Calendars API: {e}')
 
@@ -200,7 +211,7 @@ def _step_insert_metadata(symbol, data, tier, archive_db, db_path):
 
     with sqlite3.connect(db_path, timeout=30.0) as conn:
         cursor = conn.cursor()
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = now_eastern().strftime('%Y-%m-%d %H:%M:%S')
         today = now_eastern().strftime('%Y-%m-%d')
 
         # Try UPDATE first to preserve existing columns
@@ -287,10 +298,8 @@ def _step_backfill_earnings(symbol, db_path):
     try:
         from data.health.backfill_earnings_tradier import (
             load_config, phase1_fetch_events, phase2_upsert_events,
-            phase3_infer_timing, phase4_compute_moves
         )
-        config = load_config()
-        token = config.get('tradier', {}).get('api_key')
+        token = load_config()  # Returns API key string directly
         if not token:
             return 'fail  (no Tradier token)'
 
@@ -317,8 +326,9 @@ def _step_compute_moves(symbol, db_path):
             # Infer BMO/AMC timing
             phase3_infer_timing(conn, dry_run=False, symbol_filter=symbol)
             # Compute moves
-            count = phase4_compute_moves(conn, dry_run=False, symbol_filter=symbol)
-            return f'done  ({count} moves)' if count else 'done  (0 moves)'
+            stats = phase4_compute_moves(conn, dry_run=False, symbol_filter=symbol)
+            filled = stats.get('filled', 0) if isinstance(stats, dict) else stats
+            return f'done  ({filled} moves)'
     except Exception as e:
         return f'skip  ({e})'
 
@@ -404,20 +414,12 @@ def onboard_symbol(symbol, db_path):
         ('fm_universe', 'FM_UNIVERSE  (full intraday scan)'),
         ('daily_only', 'DAILY_ONLY   (OP/EI only)'),
     ])
+    if tier is None:
+        print('Cancelled.')
+        return
 
     # Step 6: Archive routing
-    archive_db, is_ambiguous = determine_archive_db(data['sector'], data['industry'])
-    if archive_db and not is_ambiguous:
-        if not prompt_yes_no(f'Confirm archive routing: {archive_db}.db?'):
-            archive_db = prompt_text('Enter archive DB name (without .db)')
-    elif archive_db and is_ambiguous:
-        reason = get_ambiguity_reason(data['industry'])
-        print(f'\n  Note: {reason}')
-        if not prompt_yes_no(f'Use default routing: {archive_db}.db?'):
-            archive_db = prompt_text('Enter archive DB name (without .db)')
-    else:
-        archive_db = prompt_text('Cannot determine archive. Enter archive DB name (without .db)')
-
+    archive_db = prompt_archive_db(data['sector'], data['industry'])
     if not archive_db:
         print('No archive DB specified. Cancelled.')
         return

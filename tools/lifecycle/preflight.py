@@ -96,19 +96,15 @@ def run_preflight_checks(symbol, tradier_data, db_path=None):
     # 4. Sector resolvable → archive routing
     sector = tradier_data.get('sector', 'N/A')
     industry = tradier_data.get('industry', 'N/A')
-    archive_db, is_ambiguous = determine_archive_db(sector, industry)
-    if archive_db and not is_ambiguous:
+    archive_db = determine_archive_db(sector, industry)
+    if archive_db:
         results.append(PreflightResult(
             'Sector resolvable', True,
-            f'{sector} / {industry} -> {archive_db}.db'))
-    elif archive_db and is_ambiguous:
-        results.append(PreflightResult(
-            'Sector resolvable', True,
-            f'{sector} / {industry} -> {archive_db}.db (ambiguous — will confirm)'))
+            f'{sector} / {industry}'))
     else:
         results.append(PreflightResult(
             'Sector resolvable', False,
-            f'Cannot determine archive for sector={sector}, industry={industry}'))
+            f'Unknown sector: {sector}'))
 
     # 5. Earnings data available
     earnings_available = tradier_data.get('earnings_available', False)

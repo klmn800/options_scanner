@@ -30,11 +30,6 @@ if project_root not in sys.path:
 from tools.timezone_utils import now_eastern
 
 
-def get_default_db_path():
-    """Get path to datalake.db"""
-    return os.path.join(project_root, 'data', 'datalake.db')
-
-
 def _ensure_lifecycle_table(conn):
     """Create symbol_lifecycle_events table if it doesn't exist.
 
