@@ -110,6 +110,16 @@ python tools/news_sentiment.py --topic technology       # Topic research
 python tools/news_sentiment.py --budget                 # Check API calls remaining
 ```
 
+### Symbol Lifecycle Management
+```bash
+python tools/symbol_lifecycle.py --add ACME       # Onboard new symbol (interactive)
+python tools/symbol_lifecycle.py --offboard ACME  # Move to purgatory
+python tools/symbol_lifecycle.py --restore ACME   # Restore from purgatory
+python tools/symbol_lifecycle.py --list           # Universe dashboard
+python tools/symbol_lifecycle.py --review         # Review pending suspects
+```
+See `tools/lifecycle/README.md` for full details. Phase 6.2 health check runs automatically in the orchestrator.
+
 ### Gmail Inbox (Email Reader)
 ```bash
 # Check for unread messages
@@ -405,7 +415,7 @@ The autofix system (`tools/autofix.py`) provides automatic error recovery. When 
 - **Phase 3** (5:00 PM): Evening — Option Pipeline, Airline Play, Final Sync
 - **Phase 4**: Evening ops — Daily Backup, Autofix Review
 - **Phase 5** (Fridays): Weekly Backup, FM Baseline Update, Earnings Refresh, Sector Archive
-- **Phase 6**: System Maintenance — Performance Data Collection (writes `data/performance.db`)
+- **Phase 6**: System Maintenance — 6.1 Performance Data Collection (writes `data/performance.db`), 6.2 Symbol Health Check (detects missing symbols, logs suspects)
 - **Execution**: Single daily cycle, launched by Task Scheduler every weekday. Holiday detection via Tradier API.
 
 ### Database Backup & Archive Strategy
@@ -465,6 +475,8 @@ System maintains **two backup files** and **sector-based archives** for redundan
 - `tools/decimal_formatter.py`: Database decimal formatting (MANDATORY)
 - `tools/performance_writer.py`: End-of-day performance data collection into `data/performance.db` (16 tables)
 - `tools/news_sentiment.py`: News sentiment collection and enrichment (replaces `strategies/news_collector/`)
+- `tools/symbol_lifecycle.py`: CLI for symbol onboarding, offboarding, universe management. See `tools/lifecycle/README.md`.
+- `tools/lifecycle/`: Package with onboarding, offboarding, routing, preflight checks, health check (Phase 6.2), audit trail, UI helpers.
 - `tools/email_reader.py`: Gmail API inbox reader for klmn800alerts@gmail.com (OAuth2, full access)
 - `tools/email_digester.py`: Spawns Claude Code (Haiku) to extract knowledge from emails into `memory/knowledge/`
 - `strategies/flow_monitor/fm_config.py` & `strategies/option_pipeline/op_config.py`: Strategy configurations
