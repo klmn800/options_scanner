@@ -470,7 +470,7 @@ System maintains **two backup files** and **sector-based archives** for redundan
 ### Core Libraries
 - `core/tradier_api.py`: Market data client
 - `core/alphavantage_api.py`: Alpha Vantage news API client (25 calls/day)
-- `core/symbols_klmn800.py`: Symbol universe definition — ~820 symbols organized by purpose: `FM_UNIVERSE` (388 symbols scanned by all strategies including FM intraday) + `DAILY_ONLY` (432 symbols for OP/EI only). Use `get_specialty_list('klmn_800')` for full universe, `get_specialty_list('fm_scan')` for FM subset. Protected in FM: Airlines, ADRs, JETS. ETFs (except JETS) moved to DAILY_ONLY — market regime uses its own Tradier calls. One purgatory block remains (58 low-liquidity, July 2025).
+- `core/symbols_klmn800.py`: Symbol universe definition — ~820 symbols organized by purpose. Source of truth is `symbol_metadata.universe_tier` in datalake.db. Use `get_specialty_list('klmn_800')` for full universe, `get_specialty_list('fm_scan')` for FM subset. **To add or remove symbols, always use `python tools/symbol_lifecycle.py` (--add, --offboard, --restore). Never edit symbol lists manually.** The CLI handles metadata, historical prices, earnings backfill, archive routing, FM baseline, and audit trail in one step.
 - `tools/timezone_utils.py`: EST timezone utilities
 - `tools/log_utils.py`: Console output toolkit — `beautiful_log()`, `create_status_box()`, `phase_header()`, and all formatted output helpers. Everything flows through this so output reaches both console and `.log` files. See `docs/CONSOLE_DEVELOPER_GUIDE.md` for patterns.
 - `tools/decimal_formatter.py`: Database decimal formatting (MANDATORY)
