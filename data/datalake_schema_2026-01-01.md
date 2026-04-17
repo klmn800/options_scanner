@@ -918,6 +918,10 @@
 | updated_at | TEXT | Last metadata update timestamp |
 | news_last_fetched | TIMESTAMP | Last news fetch timestamp |
 | archive_db | TEXT | Archive database routing (e.g., 'airlines', 'technology', 'asset_management') |
+| universe_tier | TEXT | Universe membership: fm_universe, daily_only, purgatory, removed |
+| protected_reason | TEXT | Protection category: adr, airline, cherry_pick (NULL if none) |
+| tier_changed_date | DATE | Date when universe_tier was last changed |
+| notes | TEXT | Free-form notes (cherry pick reason, removal context, etc.) |
 
 **Primary Key:** symbol
 
@@ -925,12 +929,42 @@
 1. **Archive Routing:** `archive_db` column determines which sector archive database receives the symbol's data
 2. **Industry-Specific Archives:** Supports industry breakouts (airlines, asset_management) separate from broad sectors
 3. **13 Archive Databases:** 11 sector-based + 2 industry-specific (airlines split from industrials, asset_management split from financial_services)
+4. **Universe Source of Truth (PRD 0013):** `universe_tier` replaces Python list literals as the authoritative source for which symbols belong to FM_UNIVERSE vs DAILY_ONLY. `get_specialty_list()` queries this column.
 
 **Archive Routing Logic:**
 - Industry-specific: Airlines symbols → `airlines.db`, Asset Management symbols → `asset_management.db`
-- Sector-based: All other symbols route by normalized sector name (e.g., Technology → `technology.db`)
+- Sector splits: Technology → `semiconductors.db` / `software.db` / `technology.db` by industry; Consumer Cyclical → `retail.db` / `travel_leisure.db` / `consumer_cyclical.db` by industry
+- Sector-based: All other symbols route by normalized sector name (e.g., Healthcare → `healthcare.db`)
 
-**Migration Note (Oct 28, 2025):** Added `archive_db` column to support sector-based archival system with industry-specific overrides.
+**Migration Notes:**
+- (Oct 28, 2025) Added `archive_db` column to support sector-based archival system with industry-specific overrides.
+- (Apr 16, 2026) PRD 0013: Added `universe_tier`, `protected_reason`, `tier_changed_date`, `notes` columns. Populated from Python list literals via `data/health/migrate_universe_to_db.py`.
+
+### symbol_lifecycle_events
+**Rows:** 0 (new table, grows over time)
+**Purpose:** Audit trail for all symbol universe changes (onboarding, offboarding, purgatory moves, suspect detection)
+**Populated By:** `tools/lifecycle/audit.py`, `tools/symbol_lifecycle.py`, Phase 6.2 health check
+
+| Column | Type | Description |
+|--------|------|-------------|
+| event_id | INTEGER | Auto-incrementing primary key |
+| symbol | TEXT NOT NULL | Stock ticker symbol (indexed) |
+| event_type | TEXT NOT NULL | Event classification (see below) |
+| event_date | DATE NOT NULL | Trading day of event (indexed) |
+| event_timestamp | TEXT NOT NULL | Full timestamp of event |
+| tier | TEXT | Universe tier at time of event |
+| reason | TEXT | Free-form reason text |
+| operator | TEXT NOT NULL | Who triggered: human, health_check, collector |
+| metadata_json | TEXT | JSON blob with full context |
+
+**Event Types:** `onboarded`, `offboarded`, `purgatory_added`, `purgatory_restored`, `suspect_detected`, `suspect_classified`, `rename_from`, `rename_to`
+
+**Key Features:**
+1. **Full Audit Trail:** Every symbol decision is recorded with timestamp, reason, and operator
+2. **Suspect Tracking:** Health check flags symbols missing data; `get_pending_suspects()` finds unresolved ones
+3. **Idempotent Logging:** `is_suspect_already_logged()` prevents duplicate suspect events
+
+**Added:** Apr 16, 2026 (PRD 0013 — Symbol Lifecycle Management)
 
 ### historical_prices
 **Rows:** 48,713

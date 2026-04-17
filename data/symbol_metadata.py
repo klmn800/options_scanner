@@ -598,6 +598,11 @@ def ensure_table_schema(db_path):
                 'employee_count': 'INTEGER',
                 'market_cap': 'INTEGER',
                 'avg_volume': 'INTEGER',
+                # PRD 0013: Symbol Lifecycle Management columns
+                'universe_tier': 'TEXT',
+                'protected_reason': 'TEXT',
+                'tier_changed_date': 'DATE',
+                'notes': 'TEXT',
             }
 
             # Add missing columns
