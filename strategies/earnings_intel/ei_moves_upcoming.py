@@ -513,20 +513,20 @@ def process_symbol_earnings_upcoming(symbol, db_path, config, current_date=None)
                 move_difference_pct = existing_move_diff
 
             # Calculate relative underpricing — PRIMARY signal metric (added 2026-02-10, 6Q recency 2026-04-13)
-            # Formula: (recent_6Q_avg - expected) / expected * 100
+            # Formula: (recent_6Q_avg - straddle_expected) / straddle_expected * 100
             # Answers: "By what % is the market underpricing this stock's recent earnings move pattern?"
-            # Uses straddle (preferred) or IV-based expected move as denominator.
-            # A 3% absolute diff on a 10% expected move = 30% relative underpricing (interesting!)
-            # A 3% absolute diff on a 50% expected move = 6% relative underpricing (meh)
-            #
-            # If BOTH methods return None, relative_underpricing stays None → signal = UNKNOWN.
-            # This happens for ~48% of the universe but almost entirely for earnings 31+ days out.
-            # Within 0-30 days, 96-100% of symbols have at least one method populated.
+            # Straddle-only — no fallback to IV-based expected move (2026-04-15).
+            # expected_move_pct derives from iv_front_month, which can pick up pre-earnings
+            # expirations with artificially low IV (e.g. SSNC: 16.7% IV from Apr 17 expiry
+            # before Apr 23 earnings → 2.2% expected move → false STRONG BUY +116%).
+            # If straddle is unavailable (thin option chain), signal stays UNKNOWN.
+            # This affects ~5 symbols with <10 strikes — acceptable coverage loss.
             relative_underpricing_pct = None
             if straddle_expected_move_pct and historical_avg_move_pct and straddle_expected_move_pct > 0:
                 relative_underpricing_pct = ((historical_avg_move_pct - straddle_expected_move_pct) / straddle_expected_move_pct) * 100
-            elif expected_move_pct and historical_avg_move_pct and expected_move_pct > 0:
-                relative_underpricing_pct = ((historical_avg_move_pct - expected_move_pct) / expected_move_pct) * 100
+            # No fallback to expected_move_pct — it uses iv_front_month which can pick up
+            # pre-earnings expirations with artificially low IV, producing wildly wrong signals.
+            # If straddle is unavailable (thin option chain), signal stays UNKNOWN.
 
             # Determine earnings play signal from relative underpricing
             earnings_play_signal = determine_earnings_play_signal(relative_underpricing_pct, config)

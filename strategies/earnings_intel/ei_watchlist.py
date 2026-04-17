@@ -128,7 +128,8 @@ def _cleanup_expired(cursor, today):
 def _compute_status_and_days(earnings_date_str, today):
     """Compute (status, days_to_earnings) from earnings_date and today.
 
-    days_to_earnings is calendar days to earnings (>= 0).
+    days_to_earnings is calendar days to earnings.
+    Positive = future, 0 = earnings day, negative = past (post-earnings tracking).
     Status encodes post-earnings position: T+1 / T+2 / T+3.
     """
     earnings_dt = datetime.strptime(earnings_date_str, "%Y-%m-%d").date()
@@ -139,14 +140,14 @@ def _compute_status_and_days(earnings_date_str, today):
     elif diff == 0:
         return ("TODAY", 0)
     elif diff == -1:
-        return ("T+1", 0)
+        return ("T+1", -1)
     elif diff == -2:
-        return ("T+2", 0)
+        return ("T+2", -2)
     elif diff == -3:
-        return ("T+3", 0)
+        return ("T+3", -3)
     else:
         # Should have been cleaned up — handle gracefully
-        return ("T+{}".format(abs(diff)), 0)
+        return ("T+{}".format(abs(diff)), diff)
 
 
 # ---------------------------------------------------------------------------

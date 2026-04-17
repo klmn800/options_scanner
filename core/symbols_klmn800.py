@@ -60,7 +60,7 @@ FM_UNIVERSE = [
     'INTC', 'IP', 'ITUB', 'JBLU', 'JCI', 'JD', 'JEF', 'JETS', 'JNJ',
     'KB', 'KD', 'KDP', 'KEY', 'KHC', 'KKR', 'KMB', 'KMI', 'KMX',
     'KNX', 'KO', 'KR', 'KSS', 'KVUE', 'LCID', 'LEGN', 'LI', 'LNC',
-    'LRCX', 'LSCC', 'LULU', 'LUV', 'LVS', 'LW', 'LYB', 'LYFT', 'M',
+    'LRCX', 'LSCC', 'LULU', 'LUNR', 'LUV', 'LVS', 'LW', 'LYB', 'LYFT', 'M',
     'MAT', 'MCHP', 'MDT', 'MELI', 'MET', 'MFG', 'MGM', 'MHK', 'MMM',
     'MO', 'MOH', 'MOS', 'MP', 'MPT', 'MRK', 'MRNA', 'MRVL', 'MSTR',
     'MTCH', 'MTN', 'MUFG', 'NCLH', 'NEM', 'NFLX', 'NIO', 'NKE', 'NLY', 'NNE',
@@ -233,26 +233,46 @@ Based on low average and max volume in June / July 2025
 # UTILITY FUNCTIONS
 # =============================================================================
 
-def get_specialty_list(list_name):
+def get_specialty_list(list_name, db_path=None):
     """
-    Get specialty symbol list by name.
+    Get specialty symbol list by name from symbol_metadata database.
+
+    Falls back to Python list literals if the DB query fails (safety net
+    during transition period — Python literals will be removed after
+    verification per PRD 0013 Task 2.7).
 
     Args:
         list_name (str): Name of the specialty list to retrieve
+        db_path (str, optional): Path to datalake.db. Auto-resolves if None.
 
     Returns:
-        list: List of symbols for the specified specialty list
+        list: Sorted list of symbols for the specified specialty list
 
     Available specialty lists:
         - 'klmn_800': Full ~820-symbol universe (OP, EI, metadata, etc.)
-        - 'fm_scan': FM scan universe (~454 symbols with alert history/protection)
+        - 'fm_scan': FM scan universe (~388 symbols scanned by Flow Monitor)
         - 'fm_cherry_picks': Cherry-picked symbols kept in FM for volume/thematic reasons
         - 'daily_only': Symbols tracked by OP/EI but not FM
         - 'klmn_adr': ADR / foreign-listed symbols with US options
         - 'airline_play': Airline industry tracking symbols
         - 'etf': ETF symbols for market/sector exposure
     """
-    specialty_lists = {
+    import os
+    import sqlite3
+
+    # DB query mapping: list_name -> (SQL WHERE clause, params)
+    _DB_QUERIES = {
+        'klmn_800':       ("WHERE universe_tier IN ('fm_universe', 'daily_only')", []),
+        'fm_scan':        ("WHERE universe_tier = 'fm_universe'", []),
+        'daily_only':     ("WHERE universe_tier = 'daily_only'", []),
+        'klmn_adr':       ("WHERE protected_reason = 'adr'", []),
+        'airline_play':   ("WHERE protected_reason = 'airline'", []),
+        'fm_cherry_picks':("WHERE protected_reason = 'cherry_pick'", []),
+        'etf':            ("WHERE is_etf = 1", []),
+    }
+
+    # Fallback: Python list literals (removed after PRD 0013 Task 2.7)
+    _FALLBACK_LISTS = {
         'klmn_800': KLMN_800_SYMBOLS,
         'fm_scan': FM_UNIVERSE,
         'fm_cherry_picks': FM_CHERRY_PICKS,
@@ -263,11 +283,29 @@ def get_specialty_list(list_name):
     }
 
     list_key = list_name.lower()
-    if list_key not in specialty_lists:
-        available = ', '.join(specialty_lists.keys())
+    if list_key not in _DB_QUERIES:
+        available = ', '.join(_DB_QUERIES.keys())
         raise ValueError(f"Unknown specialty list '{list_name}'. Available: {available}")
 
-    return specialty_lists[list_key]
+    # Try DB query first
+    try:
+        if db_path is None:
+            _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            db_path = os.path.join(_project_root, 'data', 'datalake.db')
+
+        where_clause, params = _DB_QUERIES[list_key]
+        with sqlite3.connect(db_path, timeout=10.0) as conn:
+            rows = conn.execute(
+                f"SELECT symbol FROM symbol_metadata {where_clause} ORDER BY symbol",
+                params
+            ).fetchall()
+            if rows:
+                return [r[0] for r in rows]
+    except Exception:
+        pass  # Fall through to Python list fallback
+
+    # Fallback to Python lists
+    return _FALLBACK_LISTS[list_key]
 
 
 def get_specialty_info():
