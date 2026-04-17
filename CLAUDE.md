@@ -196,7 +196,7 @@ This is a comprehensive **options trading scanner** system with multiple strateg
 - **tools/**: Utility scripts and helpers
 
 ### Key Strategies
-1. **Flow Monitor** (`strategies/flow_monitor/`): Real-time options flow monitoring (±20% strike range), with inline news sentiment enrichment via `tools/news_sentiment.py`
+1. **Flow Monitor** (`strategies/flow_monitor/`): Real-time options flow monitoring (±20% strike range), with inline news sentiment enrichment via `tools/news_sentiment.py` and intraday earnings signal tracking via `fm_earnings_signals.py`
 2. **Option Pipeline** (`strategies/option_pipeline/`): Open interest analysis (±20% strike range) - formerly OID (Open Interest Delta)
 3. **Earnings Intelligence** (`strategies/earnings_intel/`): Earnings intelligence with IV tracking, sector sympathy, and arbitrage detection
 4. **Airline Play** (`strategies/airline_play/`): Airline-specific options tracking with symbol-level and contract-level monitoring
@@ -468,6 +468,7 @@ System maintains **two backup files** and **sector-based archives** for redundan
 - `tools/email_reader.py`: Gmail API inbox reader for klmn800alerts@gmail.com (OAuth2, full access)
 - `tools/email_digester.py`: Spawns Claude Code (Haiku) to extract knowledge from emails into `memory/knowledge/`
 - `strategies/flow_monitor/fm_config.py` & `strategies/option_pipeline/op_config.py`: Strategy configurations
+- `strategies/flow_monitor/fm_earnings_signals.py`: Intraday earnings signal tracker — recomputes straddle underpricing from live scan data every N cycles (~hourly), logs signal upgrades/downgrades vs morning baseline. Console only, config toggle.
 
 ### Database Health Scripts
 - `data/health/db_backup.py`: Backup and query database sync

@@ -1268,7 +1268,14 @@ def run_market_hours():
     symbols = get_symbols_klmn800()
     health_reporter = FMHealthReporter()
     diag_logger = setup_diagnostic_logging()  # Initialize diagnostic logging
-    
+
+    # Earnings signal tracker (optional — config toggle)
+    earnings_tracker = None
+    est_config = config.flow_monitor_config.get('earnings_signal_tracking', {})
+    if est_config.get('enabled', False):
+        from strategies.flow_monitor.fm_earnings_signals import FMEarningsSignalTracker
+        earnings_tracker = FMEarningsSignalTracker(storage, config.config)
+
     now = now_eastern()
 
     # Log diagnostic startup
@@ -1286,7 +1293,7 @@ def run_market_hours():
             "",
             "Universe: KLMN 800 with {} symbols.".format(len(symbols)),
             "",
-            "CYCLE: Collect → Analyze → Alert → Watchlist → News → Dip → Sync",
+            "CYCLE: Collect → Analyze → Alert → Watchlist → News → Dip → Earnings → Sync",
             "",
             "📡 Collector",
             "  Gathers option contract data within reasonable ranges.",
@@ -1317,6 +1324,11 @@ def run_market_hours():
             "  Alerts on modest drops to avoid catching falling knives. Call/Put aware.",
             "  Z-score range: -0.10 to -0.20 | BUILDING sentiment required",
             "  Fallback: -1.5% to -3.5% drop | Email notification on detection",
+            "",
+            "📈 Earnings Signals{}".format(
+                " (every {} cycles)".format(earnings_tracker.check_interval) if earnings_tracker else " (disabled)"),
+            "  Recomputes straddle underpricing from live scan data.",
+            "  Logs signal upgrades/downgrades vs morning baseline (console only).",
             "",
             "🔄 Quick Sync",
             "  Incremental sync of new scans to datalake_query.db after each cycle",
@@ -1366,6 +1378,7 @@ def run_market_hours():
         sync_elapsed = 0
         sync_success = False
         sync_rows = 0
+        earnings_signal_elapsed = 0
         scan_timestamp = None  # Initialize to track success
         alerts_stored = 0  # Tracks alerts written this cycle (for performance DB)
         cycle_news_stats = None  # Per-cycle news enrichment results
@@ -1539,6 +1552,26 @@ def run_market_hours():
 
                 watchlist_elapsed = time.time() - watchlist_start
 
+                # Earnings signal tracking (intraday signal change detection)
+                earnings_signal_elapsed = 0
+                if earnings_tracker and scan_timestamp and cycle >= 2 and (cycle - 2) % earnings_tracker.check_interval == 0:
+                    print("")
+                    beautiful_log("Checking Earnings Signals (every {} cycles)".format(
+                        earnings_tracker.check_interval), 'info')
+                    est_start = time.time()
+                    try:
+                        signal_stats = earnings_tracker.track_signals(scan_timestamp)
+                        if signal_stats['upgrades'] > 0 or signal_stats['downgrades'] > 0:
+                            beautiful_log("Earnings signals: {} checked, {} upgrades, {} downgrades".format(
+                                signal_stats['symbols_checked'], signal_stats['upgrades'],
+                                signal_stats['downgrades']), 'success')
+                        else:
+                            beautiful_log("Earnings signals: {} checked, no changes".format(
+                                signal_stats['symbols_checked']), 'info')
+                    except Exception as e:
+                        logging.warning("Earnings signal tracking error (non-critical): {}".format(e))
+                    earnings_signal_elapsed = time.time() - est_start
+
                 # Quick-sync phase
                 print("")
                 beautiful_log("Starting Quick Sync", 'info')
@@ -1656,6 +1689,8 @@ def run_market_hours():
         logging.info("   🚨 Alerts: {:.1f}s".format(alert_elapsed))
         if watchlist_elapsed > 0:
             logging.info("   🎯 Watchlist: {:.1f}s".format(watchlist_elapsed))
+        if earnings_signal_elapsed > 0:
+            logging.info("   📈 Earnings Signals: {:.1f}s".format(earnings_signal_elapsed))
         if sync_elapsed > 0:
             logging.info("   🔄 DB Sync: {:.1f}s ({:,} rows)".format(sync_elapsed, sync_rows))
         logging.info("   ⏱️ Total: {:.1f}s".format(elapsed))

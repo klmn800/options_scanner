@@ -1,6 +1,6 @@
 # Options Scanner — Master To-Do List
 
-> Last reorganized: 2026-04-01
+> Last updated: 2026-04-16
 
 ---
 
@@ -39,6 +39,26 @@ Items fully done. Kept for historical reference — collapse or skip when readin
 ### 5.2 — Scan Time Management
 - **Status:** ADDRESSED
 - FM went 820 → 388 symbols, roughly doubling cycle frequency. Further optimization possible via bid-ask spread filtering or additional pruning.
+
+### 8.1 — Symbol Onboarding Tool
+- **Status:** DONE (2026-04-16, PRD 0013)
+- `python tools/symbol_lifecycle.py --add SYMBOL` — full interactive flow: Tradier API fetch (quotes + fundamentals + expirations + calendars), symbol card display, pre-flight checks, tier selection, archive routing, 7-step backfill (metadata, prices, earnings events, earnings moves, upcoming, FM baseline, audit event).
+
+### 8.2 — Symbol Offboarding / Cleanup
+- **Status:** DONE (2026-04-16, PRD 0013)
+- `python tools/symbol_lifecycle.py --offboard SYMBOL` — confirms active tier, warns on protected status, prompts reason, moves to purgatory, cleans earnings_upcoming, logs audit event.
+- `python tools/symbol_lifecycle.py --restore SYMBOL` — restores from purgatory with tier selection.
+- `python tools/symbol_lifecycle.py --list` — universe dashboard (tier counts, protected groups, suspects, recent activity, purgatory residents).
+- `python tools/symbol_lifecycle.py --review` — interactive suspect review (offboard/dismiss/skip).
+
+### 3.3 — Delisted Symbol Auto-Detection
+- **Status:** DONE (2026-04-16, PRD 0013)
+- Phase 6.2 health check detects symbols missing from `option_contracts` for 3+ days (warning) / 5+ days (suspect). 90% safety gate prevents false positives on API outage days. Suspects logged to `symbol_lifecycle_events`, surfaced in end-of-day report "Symbol Health" section. Interactive review via `--review` command.
+- **Remaining deferred:** Task 2.6 (human gate — verify DB-backed `get_specialty_list()` over a full trading day), Task 2.7 (remove Python list literals from `symbols_klmn800.py` after verification).
+
+### 1.5 — Backfill earnings_moves
+- **Status:** DONE (2026-04-13)
+- Three-phase effort: archive restoration (27K events, 665K prices) + yfinance backfill (35K events, 10K moves) + Tradier calendars backfill (Q1-Q4 2025 + Q1 2026). Final: 64,389 events, 21,919 moves, 97.1% coverage at 5+ quarters.
 
 ### Decided Against (2026-03-14)
 These were considered under Flow Monitor enhancements and explicitly rejected:
@@ -85,51 +105,17 @@ Started but not finished. Each has a clear next step.
 - **Still disabled:** Pre-earnings morning scanner (`ei_arbitrage_scanner.py`) is commented out in `ei_main.py` (lines 421-451). Needs historical correlation data — now accumulating naturally.
 - **Next action:** Uncomment pre-earnings scanner after ~1-2 months of data (est. **May 2026**). Consider targeted symbol adds to `DAILY_ONLY` to flesh out sector/industry peers. Foundation for 1.4.
 
-### 1.5 — Backfill earnings_moves
-- **Status:** DONE (2026-04-13)
-- **Root cause found:** `cleanup_tier3_production()` was deleting `earnings_events` and `historical_prices` from production after 90 days. Post-earnings calc couldn't find source data for Q3-Q4 2025 earnings because it had been purged.
-- **Fix applied (2026-04-13):** Added `skip_cleanup: True` to both tables in Tier 3 config. They still get COPIED to sector archives (DR), but no longer DELETED from production.
-- **Restoration tool:** `data/health/restore_from_archives.py` — copies 27K earnings_events + 665K historical_prices back from sector archives into production. INSERT OR IGNORE (idempotent). Run after main.py.
-- **Done previously:** Dec 2025-Feb 2026 backfilled (581 rows, 94.5% with IV) via `ei_backfill_dec_feb.py` (2026-03-02).
-- **Restoration COMPLETE (2026-04-13):** Archive restoration (27K events, 665K prices) + yfinance backfill (35K events, 10K moves). earnings_events: 602→63,128. earnings_moves: 9,926→20,194. Symbols with 6+ quarters: 706→744.
-- **Remaining gap:** Q3-Q4 2025 (~800 events) — yfinance/Finnhub don't have this data. Going-forward pipeline will capture future quarters naturally.
-- **Tools:** `data/health/restore_from_archives.py` (archive→production), `data/health/backfill_earnings_yfinance.py` (yfinance historical dates + move computation).
-
 ---
 
 ## To Do — Not Yet Started
 
 ### Symbol Lifecycle Management
 
-#### 8.1 — Symbol Onboarding Tool
-- `tools/onboard_symbol.py` — interactive script to properly add a new symbol to the universe.
-- **Steps:**
-  1. Add to `symbols_klmn800.py` (ask: FM_UNIVERSE or DAILY_ONLY)
-  2. Fetch & insert `symbol_metadata` immediately (sector, industry, market cap via Tradier)
-  3. Set `archive_db` routing in metadata based on sector mapping
-  4. Backfill `historical_prices` (Tradier historical endpoint, ~1 year)
-  5. Backfill earnings history via yfinance (dates, estimates, timing)
-  6. Compute `earnings_moves` from backfilled data
-  7. Populate `earnings_upcoming` with next earnings date
-  8. Insert `industry_peer_mappings` based on industry
-  9. Print summary of everything set up
-- Should support batch mode (`--symbols ACME,NEWCO,XYZ`) for adding multiple at once.
-- Inverse of 3.3 (delisted detection). Together they form full symbol lifecycle management.
-
-#### 8.2 — Symbol Offboarding / Cleanup (extension of 3.3)
-- When 3.3 detects a delisted symbol, beyond removing from `symbols_klmn800.py`:
-  - Clean `earnings_upcoming` (stale future dates for dead symbols)
-  - Clean `flow_watchlist_daily` (open watchlist entries that will never resolve)
-  - Optionally purge recent production data (option_contracts, flow_options_scans) for the symbol to avoid noise
-  - Archive routing becomes irrelevant — data already archived stays, new data stops flowing
-  - Log the removal with reason (acquired, merged, delisted, ticker change) for audit trail
-- Keeps the database clean of ghost data from symbols we no longer track.
-
 #### 8.3 — Automated Symbol Discovery (Future)
 - Scan IPO calendars, new options listings, or detect symbols appearing in Tradier data that aren't in our universe.
 - Suggest candidates for onboarding via end-of-day report or lifecycle review queue.
 - Human-initiated onboarding only — discovery just surfaces candidates, doesn't auto-add.
-- **Prerequisite:** 8.1 (onboarding tool) must exist first.
+- **Prerequisite:** 8.1 (onboarding tool) — DONE.
 - Brainstorm origin: symbol lifecycle management brainstorm session (2026-04-16).
 
 ### Earnings Strategy
@@ -162,10 +148,13 @@ Started but not finished. Each has a clear next step.
 - **No external data needed** — our own snapshots + archives are sufficient.
 
 #### 1.4 — Real-Time Earnings Signal Tracking
-- Wire FM to recompute straddle underpricing each cycle for symbols in `earnings_upcoming`.
-- Detect intraday signal upgrades (WATCH → BUY, BUY → STRONG BUY) as IV fluctuates.
-- Track window open/close. Needs: FM cycle integration, `earnings_upcoming` live update, alerting when thresholds cross.
-- IV change detection for earnings symbols lives here, not in FM (decided 2026-03-14). Related to 1.3.
+- **Status:** DONE (2026-04-17)
+- FM cycle sub-step recomputes straddle underpricing from live `flow_options_scans` data, compares to morning baseline in `earnings_upcoming`, logs signal upgrades/downgrades to console.
+- Runs every N cycles (default 4, ~hourly) to manage query cost. Starts on cycle 2.
+- Console only — no DB writes, no email alerts. Deduped per session.
+- Config: `flow_monitor.earnings_signal_tracking` — `enabled`, `max_days_ahead` (30), `check_interval_cycles` (4).
+- Output includes straddle dollar price + underlying price for quick RH comparison.
+- File: `strategies/flow_monitor/fm_earnings_signals.py`. Reuses `determine_earnings_play_signal()` from `ei_moves_upcoming.py`.
 
 ### Flow Monitor Strategy
 
@@ -197,14 +186,6 @@ Related: Item 6.5 (Chain Context on Flow Alerts) is the TUI display layer for th
 
 #### 3.2 — Autofix Enhancement Ideas
 - See: `autofix/enhancement_ideas.md`
-
-#### 3.3 — Delisted Symbol Auto-Detection
-- When OP/FM collectors fail to get data for a symbol (no quotes, no option chains, `unmatched_symbols`), track the failure.
-- After N consecutive trading-day failures (e.g., 3), queue to autofix as `"delisted_suspect"` category.
-- Autofix agent does web research to determine cause (acquisition, merger, delisting, ticker change) and either removes from `symbols_klmn800.py` or moves to a delisted purgatory section for Ben's review.
-- Detection signals from Tradier: `unmatched_symbols` (definite), `volume=0 + open=null` on trading days (probable).
-- Lightweight — piggybacks on failures already happening in collectors, no extra API calls.
-- Origin: SEE/HOLX/EXAS/AL all discovered manually via backfill failures (2026-04-13).
 
 ### Morning Views TUI
 
