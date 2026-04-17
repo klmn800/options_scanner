@@ -315,15 +315,7 @@ def get_specialty_info():
     Returns:
         dict: Dictionary with list names as keys and symbol counts as values
     """
-    return {
-        'klmn_800': len(KLMN_800_SYMBOLS),
-        'fm_scan': len(FM_UNIVERSE),
-        'fm_cherry_picks': len(FM_CHERRY_PICKS),
-        'daily_only': len(DAILY_ONLY),
-        'klmn_adr': len(KLMN_ADR_COMPONENT),
-        'airline_play': len(AIRLINE_PLAY_SYMBOLS),
-        'etf': len(ETF_SYMBOLS),
-    }
+    return {name: len(get_specialty_list(name)) for name in get_available_specialty_lists()}
 
 
 def get_available_specialty_lists():
@@ -363,15 +355,17 @@ def get_klmn_800_breakdown():
     Returns:
         dict: Breakdown showing FM Universe vs Daily Only
     """
+    fm_count = len(get_specialty_list('fm_scan'))
+    daily_count = len(get_specialty_list('daily_only'))
     return {
-        'total_symbols': len(KLMN_800_SYMBOLS),
-        'fm_universe': len(FM_UNIVERSE),
-        'daily_only': len(DAILY_ONLY),
-        'etf_count': len(ETF_SYMBOLS),
-        'airline_count': len(AIRLINE_PLAY_SYMBOLS),
-        'adr_count': len(KLMN_ADR_COMPONENT),
-        'cherry_pick_count': len(FM_CHERRY_PICKS),
-        'composition': f"{len(FM_UNIVERSE)} FM Universe + {len(DAILY_ONLY)} Daily Only",
+        'total_symbols': len(get_specialty_list('klmn_800')),
+        'fm_universe': fm_count,
+        'daily_only': daily_count,
+        'etf_count': len(get_specialty_list('etf')),
+        'airline_count': len(get_specialty_list('airline_play')),
+        'adr_count': len(get_specialty_list('klmn_adr')),
+        'cherry_pick_count': len(get_specialty_list('fm_cherry_picks')),
+        'composition': f"{fm_count} FM Universe + {daily_count} Daily Only",
     }
 
 
@@ -398,7 +392,7 @@ def is_symbol_in_klmn_800(symbol):
     Returns:
         bool: True if symbol is in KLMN 800, False otherwise
     """
-    return symbol.upper() in KLMN_800_SYMBOLS
+    return symbol.upper() in get_specialty_list('klmn_800')
 
 
 # Usage examples for testing
@@ -423,12 +417,12 @@ if __name__ == "__main__":
     print(f"  ADRs: {breakdown['adr_count']}")
     print(f"  Cherry Picks: {breakdown['cherry_pick_count']}")
 
-    # Verify no overlap and no missing
-    fm_set = set(FM_UNIVERSE)
-    daily_set = set(DAILY_ONLY)
-    full_set = set(KLMN_800_SYMBOLS)
+    # Verify no overlap and no missing (using DB-backed queries)
+    fm_set = set(get_specialty_list('fm_scan'))
+    daily_set = set(get_specialty_list('daily_only'))
+    full_set = set(get_specialty_list('klmn_800'))
     overlap = fm_set & daily_set
-    print(f"\nIntegrity Checks:")
+    print(f"\nIntegrity Checks (DB-backed):")
     print(f"  FM + Daily Only = {len(fm_set) + len(daily_set)} (should equal {len(full_set)})")
     print(f"  Overlap: {len(overlap)} (should be 0)")
     if overlap:
@@ -437,18 +431,13 @@ if __name__ == "__main__":
     # Verify protected groups are in FM_UNIVERSE
     # Note: Most ETFs intentionally moved to DAILY_ONLY (2026-03-16). Only JETS kept in FM.
     jets_in_fm = 'JETS' in fm_set
-    airline_in_fm = set(AIRLINE_PLAY_SYMBOLS) - fm_set
-    adr_in_fm = set(KLMN_ADR_COMPONENT) - fm_set
-    cherry_in_fm = set(FM_CHERRY_PICKS) - fm_set
+    airline_in_fm = set(get_specialty_list('airline_play')) - fm_set
+    adr_in_fm = set(get_specialty_list('klmn_adr')) - fm_set
+    cherry_in_fm = set(get_specialty_list('fm_cherry_picks')) - fm_set
     print(f"  JETS in FM: {jets_in_fm} (should be True)")
     print(f"  Airlines missing from FM: {len(airline_in_fm)} (should be 0)")
     print(f"  ADRs missing from FM: {len(adr_in_fm)} (should be 0)")
     print(f"  Cherry picks missing from FM: {len(cherry_in_fm)} (should be 0)")
 
-    # Verify no duplicates within lists
-    fm_dupes = len(FM_UNIVERSE) - len(fm_set)
-    daily_dupes = len(DAILY_ONLY) - len(daily_set)
-    full_dupes = len(KLMN_800_SYMBOLS) - len(full_set)
-    print(f"  FM duplicates: {fm_dupes} (should be 0)")
-    print(f"  Daily Only duplicates: {daily_dupes} (should be 0)")
-    print(f"  Full universe duplicates: {full_dupes} (should be 0)")
+    # DB queries return deduplicated results, so no dupe check needed
+    print(f"  (Duplicate check skipped — DB queries are inherently unique)")

@@ -152,13 +152,13 @@ class ConversationContext:
         """Extract stock symbols from text using KLMN 800 universe validation"""
         import re
         
-        # Import your proven KLMN 800 symbol universe
+        # Import KLMN 800 symbol universe (DB-backed with fallback)
         try:
-            from core.symbols_klmn800 import KLMN_800_SYMBOLS
-            valid_symbols = set(KLMN_800_SYMBOLS)
+            from core.symbols_klmn800 import get_specialty_list
+            valid_symbols = set(get_specialty_list('klmn_800'))
         except ImportError:
             # Fallback if import fails
-            vanna_logger.warning("Could not import KLMN_800_SYMBOLS, using basic validation")
+            vanna_logger.warning("Could not import get_specialty_list, using basic validation")
             valid_symbols = set()
         
         # Extract potential symbols (2-5 uppercase letters)

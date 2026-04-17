@@ -592,11 +592,11 @@ class SessionLogger:
             list: Valid symbols found in the question
         """
         try:
-            # Import KLMN800 symbols
-            from core.symbols_klmn800 import KLMN_800_SYMBOLS
-            
+            # Import KLMN800 symbols via DB-backed query
+            from core.symbols_klmn800 import get_specialty_list
+
             # Convert to set for fast lookup
-            valid_symbols = set(KLMN_800_SYMBOLS)
+            valid_symbols = set(get_specialty_list('klmn_800'))
             
             # Find potential symbols (3-5 letter uppercase words)
             import re

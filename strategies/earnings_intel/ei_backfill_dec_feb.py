@@ -41,7 +41,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / 'tools'))
 
 from core.finnhub_api import FinnhubAPI
-from core.symbols_klmn800 import get_specialty_list, ETF_SYMBOLS
+from core.symbols_klmn800 import get_specialty_list
 from tools.timezone_utils import now_eastern, eastern_isoformat
 from tools.log_utils import beautiful_log
 from tools.decimal_formatter import clean_database_row
@@ -53,8 +53,8 @@ from strategies.earnings_intel.ei_backfill_metrics import (
 BACKFILL_FROM = '2025-12-01'
 BACKFILL_TO = '2026-02-28'
 
-# ETFs to exclude (no earnings)
-ETF_EXCLUSIONS = set(ETF_SYMBOLS) | {'JETS'}
+# ETFs to exclude (no earnings) — DB-backed via is_etf=1 (includes JETS)
+ETF_EXCLUSIONS = set(get_specialty_list('etf'))
 
 
 def get_database_path():

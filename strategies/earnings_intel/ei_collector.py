@@ -42,7 +42,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, project_root)
 
 from core.finnhub_api import FinnhubAPI
-from core.symbols_klmn800 import get_specialty_list, ETF_SYMBOLS
+from core.symbols_klmn800 import get_specialty_list
 from tools.timezone_utils import now_eastern, eastern_isoformat
 from tools.log_utils import beautiful_log
 from tools.decimal_formatter import clean_database_row
@@ -84,8 +84,8 @@ SIGNAL_COLUMNS = [
     'revenue_estimate',
 ]
 
-# ETFs to exclude (no earnings data)
-ETF_EXCLUSIONS = set(ETF_SYMBOLS) | {'JETS'}
+# ETFs to exclude (no earnings data) — DB-backed via is_etf=1 (includes JETS)
+ETF_EXCLUSIONS = set(get_specialty_list('etf'))
 
 
 class EarningsCollector:
