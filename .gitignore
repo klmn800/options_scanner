@@ -15,6 +15,7 @@ client_secret_*.json
 *.db-wal
 Deprecated/
 memory/
+!strategic_advisor/memory/
 
 # Sensitive config (contains API keys)
 config.json
