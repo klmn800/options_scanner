@@ -110,8 +110,8 @@ class OrchestratorUIMixin:
     def _get_symbol_count(self):
         """Get actual KLMN 800 symbol count for banner display."""
         try:
-            from core.symbols_klmn800 import get_symbols_klmn800
-            return len(get_symbols_klmn800())
+            from core.symbols_klmn800 import get_specialty_list
+            return len(get_specialty_list('klmn_800'))
         except Exception:
             return 800  # Fallback
 

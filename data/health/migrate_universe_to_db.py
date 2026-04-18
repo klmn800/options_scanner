@@ -2,14 +2,13 @@
 """
 One-Time Migration: Populate Universe Columns in symbol_metadata
 -----------------------------------------------------------------
-Reads all lists from core/symbols_klmn800.py and populates the new
-PRD 0013 columns: universe_tier, protected_reason, is_etf, tier_changed_date, notes.
+HISTORICAL — This script was run on 2026-04-16 to migrate Python list
+literals into symbol_metadata DB columns. It will NOT work anymore because
+the Python list constants (FM_UNIVERSE, DAILY_ONLY, etc.) were removed
+from core/symbols_klmn800.py in PRD 0013 Task 2.7 (2026-04-17).
 
-Run once. Idempotent (safe to re-run — overwrites previous values).
-
-Usage:
-    python data/health/migrate_universe_to_db.py --dry-run   # Preview only
-    python data/health/migrate_universe_to_db.py              # Execute
+Kept for reference only. The DB is now the sole source of truth.
+Use `python tools/symbol_lifecycle.py` for all universe changes.
 
 PRD 0013 — Symbol Lifecycle Management
 """
