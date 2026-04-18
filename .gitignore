@@ -16,6 +16,7 @@ client_secret_*.json
 Deprecated/
 memory/
 !strategic_advisor/memory/
+strategic_advisor/.session_prompt.md
 
 # Sensitive config (contains API keys)
 config.json

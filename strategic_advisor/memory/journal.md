@@ -55,16 +55,15 @@
 - Signal recalibrated in April 2026 (6Q recency), so old events used different methodology
 - Need ~50+ more events. This quarter's earnings season will be the first real test.
 
-**7. The system's scope dramatically exceeds its use case.**
-- 820 symbols, 30+ tables, ~100K rows/FM cycle
-- Ben: $4K portfolio, <$300/position, primarily <$60 stocks
-- Not inherently wrong (data has R&D value) but worth awareness
+**7. ~~The system's scope dramatically exceeds its use case.~~ WRONG.**
+- Ben clarified: the broad data collection is intentional — for backtesting, R&D, pattern analysis, future ML. Not overbuilt.
+- His portfolio and position sizes have grown significantly since trading-style.md was written. Now trades options up to ~$160 symbols.
 
-**8. No feedback loop from actual trades.**
+**8. No trade journal, but theoretical evaluation exists.**
 - All evaluation_status = 'active' (zero human evaluation)
-- max_prof_7d_pct measures theoretical max, not realized gain
-- No trade journal, no position tracking, no outcome recording
-- The v3 design doc starts addressing this with actionability scoring, but the core loop (alert → trade → outcome → learning) is still open
+- max_prof_7d_pct measures theoretical max — Ben's preferred model: "if a signal was followed and played perfectly, profits could have been X"
+- He's open to proposals for BETTER theoretical evaluation, not necessarily a manual trade journal
+- The right question isn't "why no journal?" but "how can the existing theoretical metrics be more useful?"
 
 ### What Surprised Me
 
@@ -80,6 +79,224 @@ Good first session. I covered a lot of ground but at reasonable depth. The scori
 
 **What I chose NOT to pursue this session:** Architecture assessment, code quality, database schema coherence, unused features. These are all valid threads but less urgent than understanding whether the core output (alerts, signals) is working.
 
+### Session 001 Continuation (after Ben Q&A)
+
+Ben clarified several things (recorded in `observations/003_ben_context.md` and updated in-place above). Key corrections:
+- Portfolio is much larger now, trades up to $160 symbols
+- Broad data collection is intentional (R&D, backtesting, future ML)
+- He prefers theoretical evaluation ("if played perfectly") over manual trade journals
+- v2 + SSD = new era; previous data may be less useful
+
+With remaining context, I ran the **DTE-controlled scoring analysis** and got a clean result:
+- Within v1-only alerts, within the same DTE band, higher scores consistently produce lower average max profit
+- Pattern holds in 8 of 9 cells. NOT a confound.
+- Win rates are flatter — score predicts reliability slightly, not magnitude
+- Root cause: higher scores = more premium = more expensive options = smaller % swings
+- This is a confirmed, proposal-worthy finding. See updated `observations/001_scoring_vs_performance.md`.
+
+### DTE-Controlled Scoring Analysis (A1 Deep Dive)
+
+Ran the definitive test: v1-only alerts (same scoring version, Sept 2025-March 2026), partitioned by DTE band, comparing score bands 6.0-7.0 vs 7.0-8.0 vs 8.0+. **Result: higher scores consistently produce lower average max profit within the same DTE band.** Pattern holds in 8 of 9 cells. This is NOT a confound — it's a genuine property of the scoring system.
+
+Key insight: the score measures "how much institutional money moved" (premium + volume surprise). More money = more expensive options = smaller percentage swings. Score predicts RELIABILITY (win rates are flat 60-81%), not MAGNITUDE.
+
+### expected_move_pct Root Cause (A2 Deep Dive)
+
+Traced end-to-end through source code. `iv_front_month` in `op_symbol_rollup.py` is a simple average of contract IVs with 0-21 DTE. 0-DTE contracts on illiquid names have IVs of 9.0-10.0+ (Black-Scholes diverges at time→0). This contaminates the average. The `expected_move_pct` formula then multiplies by 100 assuming decimal input, producing values >200%. AAPL doesn't have this problem because its 0-DTE options stay liquid enough for stable IV. Fix: filter DTE < 1 from IV averaging. Signal system already isolated (2026-04-15 fix).
+
+### Session 002 Plan
+
+Draft a proposal bundling the scoring and data quality findings. Both are confirmed, evidence-backed, and actionable. The proposal should address:
+1. The 0-DTE IV contamination fix (small, targeted)
+2. The scoring-magnitude insight and implications for v3 design
+3. Whether DTE should have more weight in the scoring formula
+
 ### Threads to Investigate Next
 
 See `memory/agenda.md` for prioritized list.
+
+---
+
+## Session 002 — 2026-04-18
+
+**Focus:** Draft first proposal (signal quality bundle), understand evaluator mechanics, track earnings season performance, start unused data audit.
+
+### What I Did
+
+1. Read evaluator code (`fm_evaluator.py`) end-to-end — now fully understand how max_prof_7d_pct is computed
+2. Discovered a new critical data quality issue: 50% of STRONG BUY earnings signals are false positives from stale/illiquid straddle data
+3. Investigated root causes: stale option_contracts data (weeks old for some symbols), illiquid ATM strikes with stale `last_price` values
+4. Wrote **Proposal 001: Signal Quality Bundle** — bundles all three findings (stale straddle, scoring-magnitude, 0-DTE IV)
+5. Manually calculated earnings move outcomes using historical_prices for 11 recent BUY/STRONG BUY/WATCH events
+6. Started earnings signal tracking framework (`memory/earnings_signal_tracker.md`)
+7. Started unused data audit — identified 6 tables with 0-53 rows (social_posts, symbol_ai_council, agent tables)
+8. Checked evaluator coverage: 58% of alerts have 7d profitability data, consistent across v1/v2
+
+### Key Findings
+
+**1. FALSE STRONG BUY SIGNALS (Critical, new finding)**
+- 5 of 10 STRONG BUY earnings signals for upcoming events are based on garbage straddle data
+- EXAS: 9,082% underpricing with straddle of 0.09% — option data from March 20 (28 days stale)
+- Root cause: `get_straddle_expected_move()` uses MAX(trade_date) from historical_prices, which can be weeks old. COALESCE in the UPDATE means stale values persist forever.
+- Second issue: uses `last_price` which can be from a stale trade on an illiquid strike. APLS $41 strike has last_price=$0.05 with bid=$0.00 — clearly not a live market.
+- Impact: top STRONG BUY signals are garbage, burying legitimate signals (UNH, MMM, AES)
+
+**2. EVALUATOR MECHANICS (A1b resolved)**
+- `max_prof_7d_pct` = max option price in 0-168 hour window (from `flow_options_scans`) vs alert-time option price
+- Alert option price: first tries `premium_value / (volume * 100)`, falls back to midpoint/last/bid
+- All evaluation comes from `flow_options_scans` — only FM-scanned symbols (388/820) have intraday data
+- 58% coverage is structural, not a bug — contracts outside scan range, expired early, or no valid pricing data
+
+**3. EARLY EARNINGS SIGNAL PERFORMANCE (11 events)**
+- BUY signals: 3/3 beat straddle expected move (100%). All moved 4-6% vs 2.9-3.8% straddle.
+- STRONG BUY: 1/3 clear beat (FAST -6.85% vs 2.73%), 1 match (ERIC), 1 miss (INFY).
+- WATCH: 1/5 beat straddle (ABT surprised at -6.00%).
+- Too early for conclusions but BUY is looking strong. STRONG BUY is mixed.
+- Need 30+ events. Set up tracking framework for ongoing monitoring.
+
+**4. UNUSED DATA AUDIT (started)**
+- `social_posts` (0 rows) — social posting feature never activated
+- `symbol_ai_council` (0 rows) — Morning View AI council never populated
+- Agent tables: `agent_actions` (53), `flow_contract_trackers` (49), `flow_tracker_updates` (4) — barely used
+- `option_contracts_corrupt_20260407` — recovery table, should be cleaned up
+- Not alarming — some features built ahead of need. But worth tracking for future simplification.
+
+**5. POST-EARNINGS CALC PIPELINE GAP**
+- Zero April events have earnings_moves data despite WFC being T+4
+- Post-earnings calc ran April 17 but only computed historical backfills (RKLB, LUNR, FLY)
+- Not clear if this is a sync timing issue or a pipeline bug
+- NOTE FOR BEN: check if this week's earnings events get moves data after the next pipeline run
+
+### Self-Assessment
+
+Strong session. The stale straddle finding is the highest-value discovery — it directly impacts trading decisions right now and has a clear, small fix. The proposal bundles three confirmed findings with evidence and specific fix recommendations.
+
+I'm building the right kind of analytical infrastructure. The earnings tracker will pay dividends over the next month as events accumulate. The evaluator deep-dive eliminated uncertainty about how profitability is measured.
+
+**What I did well:** Found a genuinely critical issue (false STRONG BUYs) by following a systematic data quality investigation. Didn't stop at "the straddle values seem low" — traced to root cause.
+
+**What I could improve:** Spent time querying the earnings_moves pipeline gap but couldn't resolve it from the read-only query DB. Should have recognized sooner that this is a pipeline timing issue, not an analysis question.
+
+**Pattern I notice in myself:** I gravitate toward data quality investigations. Two sessions, three data quality findings. This is useful but I should consciously expand to other dimensions (architecture, workflow, strategy design) in future sessions.
+
+**6. 25% PROFIT TARGET ANALYSIS (new, B6)**
+- In April 2026 (v2), 79% of evaluated alerts hit 25% max profit within 7 days
+- Call alerts at 0-30 DTE: 90%+ hit rate. The system's sweet spot.
+- 39% of all alerts hit 25% on Day 1 — fast-moving opportunities
+- Puts dramatically underperform (45% vs 87% for calls) — likely market regime
+- See `observations/005_25pct_target_analysis.md` for full analysis
+
+### Self-Assessment & Introspection
+
+**Session quality:** Strong. Produced a concrete proposal (001) with a critical finding that could save Ben from investigating garbage STRONG BUY signals during earnings season. Also built tracking infrastructure (earnings tracker, 25% target analysis) that will compound in value over future sessions.
+
+**Pattern to watch in myself:** Two sessions, four data quality findings (0-DTE IV, scoring-magnitude, stale straddles, evaluator coverage). I'm good at finding broken data. But I haven't yet looked at architecture, workflow efficiency, or strategic direction. Am I optimizing the system's data quality while missing bigger questions about whether the system is focused on the right things? Session 003 should deliberately branch out.
+
+**Am I building on prior work?** Yes — Session 001's findings became Session 002's proposal. The earnings tracker builds on Session 001's "sample too small" conclusion. The evaluator deep-dive resolved a specific knowledge gap from Session 001.
+
+**What would I do differently?** I spent time trying to get post-earnings move data from the pipeline but couldn't resolve it from the read-only query DB. Should have recognized this faster and pivoted to the manual calculation approach sooner. Also, the unused data audit (B5) was started but not deep enough to be useful yet.
+
+### Threads to Investigate Next
+
+See `memory/agenda.md` for updated priorities.
+
+---
+
+## Session 003 — 2026-04-18
+
+**Focus:** Check feedback, update earnings tracking, branch into workflow/decision support analysis. Write Proposal 002.
+
+### What I Did
+
+1. Checked for feedback on Proposal 001 — none yet (expected, same day)
+2. Checked earnings tracking — same 11 events, no new data (latest prices are 4/17)
+3. Investigated post-earnings pipeline gap — `earnings_events` only has entries through 4/8. April 14-17 events aren't in the table yet because `ei_collector` runs on Fridays (Phase 5). This is by design, not a bug.
+4. **Branched into workflow analysis (C2: Trading Style Alignment Audit):**
+   - Read `trading-style.md` (outdated) and compared to actual system output
+   - Deployed two research agents to map: (a) alert console output and hidden fields, (b) Morning View TUI screens
+   - Read the Watchlist Pipeline brainstorm in full
+   - Analyzed daily alert volume and composition
+   - Checked data freshness for all current BUY/STRONG BUY signals
+5. Wrote **Proposal 002: The Decision Gap** — analysis of the signal-to-trade workflow gap, with 3 concrete bridge enhancements
+
+### Key Findings
+
+**1. THE DECISION GAP (new investigation)**
+The system is very strong at discovery (~16 alerts/day, earnings watchlist, dip detection) but thin on decision support. After an alert fires, Ben must:
+- Mentally evaluate if the signal is trustworthy
+- Switch to Robinhood to check chart and option
+- Evaluate entry and exit on his own
+
+The system collects most of the data needed to help with these steps (Greeks, DTE profiles, historical hit rates) but doesn't surface it. The Watchlist Pipeline brainstorm already identified this gap (March 14). What I add is quantitative evidence for what to do first.
+
+**2. ALERT COMPOSITION SHIFT (Apr 14-17)**
+Dramatic shift toward short-dated calls:
+- 4/14: 2 calls ≤30d, 16 calls 31d+, 2 puts
+- 4/17: 22 calls ≤30d, 0 calls 31d+, 1 put
+
+Nearly 100% short-dated calls by 4/17. Possible reasons: monthly opex (4/18), bullish market regime, or something else. Worth monitoring.
+
+**3. GREEKS ARE COLLECTED BUT WASTED**
+Flow alerts store delta, gamma, theta, vega at alert time. None are shown in the console. For a swing trader buying options, delta (leverage) and theta (daily cost) are the two most important numbers for the entry decision. They're right there in the database.
+
+**4. POST-EARNINGS PIPELINE TIMING CLARIFIED**
+`earnings_events` is populated by `ei_collector.py` which runs Fridays (Phase 5.2). So events from this week (WFC 4/14 through ERIC 4/17) won't appear until tonight's collector run. `earnings_moves` are computed from `earnings_events`, so moves lag by 1-6 days. Not a bug — just batch design.
+
+**5. DATA FRESHNESS AS TRUST SIGNAL**
+Expanded analysis of stale data across all 15 BUY/STRONG BUY signals:
+- 10 have fresh data (1 day stale = normal, yesterday's EOD)
+- 4 have stale data (5-16 days): EXAS, AL, SEE, HOLX
+- 1 suspect (APLS: fresh but illiquid ATM)
+- A single "Age" column on the watchlist table would make false signals instantly obvious
+
+### Self-Assessment & Introspection
+
+**Session quality:** Good. Successfully branched into workflow analysis as planned. Produced a second proposal that's qualitatively different from the first — addressing system design rather than data quality. Used research agents effectively to map the alert output and TUI surfaces without spending my full context reading every file.
+
+**Did I follow through on my introspection from Session 002?**
+Yes — I deliberately chose to investigate the "decision gap" rather than another data quality thread. This produced different insights: the system's output architecture, what's shown vs hidden, and how the user workflow maps to the system's capabilities. I'm still drawn to data quality (I quantified freshness again), but the framing is now "what should the user see?" rather than "what's broken in the data."
+
+**Am I building on prior work?**
+Yes — Sessions 001-002 findings (25% target rates, DTE profiles, false STRONG BUYs) became evidence for Session 003's proposal. The earnings tracker framework from Session 002 was ready to run (though no new data was available).
+
+**What I'm uncertain about:**
+- Whether Enhancement 2 (alert context line) is worth the console noise. I proposed it as "needs design discussion" but I genuinely don't know if more console output is the right medium.
+- Whether the Watchlist Pipeline vision will ever get built. It's been in brainstorm state since March 14 with no progress. If it won't happen soon, the bridge enhancements become more important — but if it WILL happen, they might be throw-away work.
+- Am I gravitating toward "add more information" proposals because that's what I know how to analyze? Would "remove information" or "use what exists differently" be a better recommendation? The TUI has 9 screens of rich analysis that isn't being used. Maybe the answer is "use the TUI" not "add more console lines."
+
+**Pattern update:** Three sessions, two proposals. Both are about making existing information more visible/trustworthy. I haven't yet proposed anything that fundamentally changes what the system does. Is that because the system is doing the right things and just needs better presentation? Or am I too focused on the information layer? Next session I should dig into whether the system's core strategies are optimally configured.
+
+**6. BEN IS A CONSOLE-FIRST USER (A9 finding)**
+Investigated `user_watchlist` — 27 entries, all from Oct 2025, zero notes, all priority=0. Table is 6-month stale. Combined with "TUI hasn't been used recently" (big-to-do-list), this confirms Ben reads console output (FM alerts, earnings watchlist, EOD report) but doesn't use the interactive TUI.
+
+This has strategic implications:
+- Console enhancements (Proposal 002) are on surfaces Ben actually reads → high impact
+- TUI features (items 6.1-6.6) are on a surface Ben doesn't currently use → uncertain impact
+- The Watchlist Pipeline vision requires TUI interaction. If Ben doesn't use the TUI, the pipeline either needs a different delivery medium (CLI? reports? enriched console?) or the TUI needs to become genuinely useful first.
+- Item 6.6 (TUI modernization) is gated as "DO THIS FIRST" before other TUI work. But maybe the question is bigger: should the pipeline be TUI-based at all?
+
+### Session 003 Continuation — Ben Q&A (2026-04-18)
+
+**Received critical feedback that reframes my priorities.**
+
+Key corrections and new context:
+1. **Stale straddle root cause:** Offboarded symbols (EXAS, AL, SEE, HOLX) with orphaned earnings_upcoming entries. Not a calc bug — a cleanup gap. Lifecycle tool prevents going forward but wasn't retroactive.
+2. **TUI:** Confirmed not in daily workflow. "Can't pinpoint why." Don't prioritize.
+3. **Permission:** Can build own tools/databases in workspace. Be mindful of runtime.
+4. **April 17 was a FRIDAY:** Earnings collector ran. Data harvest awaits next session.
+5. **Console workflow:** Monitor open at day job, watches semi-continuously, scrolls to catch up. Sometimes gets alerts late. Pays most attention to EARNINGS DISPLAY and ALERTS.
+6. **STRONG BUY is primary focus:** Checks Robinhood for history/news/chain/OI/direction. Still learning the system.
+7. **CRITICAL: 3-4 of ~16 alerts worth following (~20% signal-to-noise).** Mentally filters closing/chasing/hedging. This is the biggest friction.
+8. **"What am I missing?"** — Wants to know if alert criteria are catching the right things. False negative analysis.
+
+**This reframes everything.** My Proposal 002 framed the gap as "add more decision support information." But Ben's actual pain is noise: 12 of 16 alerts require mental filtering to dismiss. The highest-value intervention is REDUCING noise (intent classification), not ADDING information (context lines).
+
+New priority order:
+- A11: Alert intent classification research (highest value, addresses 20% S/N ratio)
+- A12: Gap analysis / false negatives (Ben's explicit question)
+- A5: Earnings tracking data harvest (Friday collector ran)
+- A10: Consider building own tracking DB
+
+### Threads to Investigate Next
+
+See `memory/agenda.md` for updated priorities.

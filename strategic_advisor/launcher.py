@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 # Project root is parent of this script's directory
@@ -166,8 +167,24 @@ def main():
 
     session_num = get_session_number()
 
+    # Build session prompt: date context + main prompt
+    # Date injection prevents Claude's day-of-week confusion
+    now = datetime.now()
+    date_header = (
+        f"**Today is {now.strftime('%A, %B %d, %Y')}. "
+        f"Day of week: {now.strftime('%A')}. "
+        f"This is a fact, not an estimate.**\n\n"
+    )
+
+    prompt_text = date_header + PROMPT_FILE.read_text(encoding='utf-8')
+
+    # Write combined prompt to temp file
+    session_prompt = PROJECT_ROOT / 'strategic_advisor' / f'.session_prompt.md'
+    session_prompt.write_text(prompt_text, encoding='utf-8')
+
     print(f"{'=' * 50}")
     print(f"  Strategic Advisor — Session {session_num:03d}")
+    print(f"  {now.strftime('%A, %B %d, %Y %I:%M %p')}")
     print(f"{'=' * 50}")
     print(f"  Prompt: {PROMPT_FILE}")
     print(f"  Workspace: {MEMORY_DIR.parent}")
@@ -175,14 +192,14 @@ def main():
     print()
 
     if args.headless:
-        success, output = spawn_headless(PROMPT_FILE)
+        success, output = spawn_headless(session_prompt)
         if output:
             print(f"\n{'=' * 50}")
             print("Session Output:")
             print(f"{'=' * 50}")
             print(output[-2000:] if len(output) > 2000 else output)
     else:
-        success = spawn_visible(PROMPT_FILE)
+        success = spawn_visible(session_prompt)
         if success:
             print("Watch the Claude Code window for progress.")
             print(f"Proposals will appear in: {REVIEWS_DIR}")
