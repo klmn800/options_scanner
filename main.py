@@ -622,6 +622,8 @@ Testing with Time Simulation (auto-expires after 4 hours by default):
                            help='Run database backup only')
     mode_group.add_argument('--airline-play', action='store_true',
                            help='Run Airline Play tracking only')
+    mode_group.add_argument('--fm-baseline', action='store_true',
+                           help='Run FM baseline update only')
 
     # Additional options
     parser.add_argument('--debug', action='store_true',
@@ -705,6 +707,10 @@ def main():
         elif args.airline_play:
             orchestrator.print_banner("airline-play")
             success = orchestrator.run_airline_play_phase()
+        elif args.fm_baseline:
+            orchestrator.print_banner("fm-baseline")
+            result = orchestrator.run_fm_baseline_update()
+            success = result.get('success', False)
         else:
             # Default: Run one complete daily cycle
             orchestrator.print_banner("full")
