@@ -19,8 +19,7 @@ This document describes Ben's trading approach and constraints to help provide r
 ## Portfolio Constraints
 
 ### Capital Allocation
-- **Total portfolio**: ~$4,000
-- **Position sizing**: <$300 per trade (7.5% max position size)
+- **Position sizing**: Up to ~$500 per trade
 - **Risk management**: Limited downside to premium paid per position
 
 ### Trading Platform
@@ -30,8 +29,9 @@ This document describes Ben's trading approach and constraints to help provide r
 ## Symbol Universe
 
 ### Active Tracking
-- **Primary focus**: Symbols with stock price < $60
-- Rationale: More affordable options premiums, larger percentage moves
+- **Primary focus**: Symbols with stock price up to ~$160
+- Rationale: Affordable options premiums, meaningful percentage moves
+- Budget has grown significantly — more of the universe is tradeable now
 
 ### Passive Tracking
 - Monitor many additional symbols across price ranges
@@ -43,10 +43,10 @@ This document describes Ben's trading approach and constraints to help provide r
 When providing trade ideas or analysis:
 - Focus on **buying opportunities** (calls for bullish, puts for bearish)
 - Avoid suggesting selling strategies (spreads, covered calls, etc.)
-- Consider **affordability**: Options should fit within $300 position size
+- Consider **affordability**: Options should fit within ~$500 position size
 - Emphasize **swing trade timeframes** (days to weeks, not day trades or LEAPS)
 - Remember **25% profit target** as baseline exit strategy
-- Prioritize symbols under $60 for active consideration
+- Prioritize symbols up to ~$160 for active consideration
 - Account for **Robinhood's interface** (no complex order types, limited Greeks display)
 
 ## Notes for Future Expansion
