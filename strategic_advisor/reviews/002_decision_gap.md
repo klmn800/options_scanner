@@ -1,3 +1,5 @@
+> **NOTE:** This is NOT a good example of a proposal. It reads as a findings/analysis report, not a work order. See PROMPT.md for what a proposal should be. Do not use this as a template.
+
 # Proposal 002: The Decision Gap — Bridging Signals to Trades
 
 **Date:** 2026-04-18 (Session 003)

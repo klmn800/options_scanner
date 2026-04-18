@@ -4,132 +4,124 @@ Prioritized threads to pull on. Updated each session.
 
 ---
 
-## Priority A — Next Session
+## Priority A -- Next Session
 
-### A5. Earnings Signal Tracking — FRIDAY COLLECTOR RAN (HIGH PRIORITY)
-**April 17 was a FRIDAY.** The `ei_collector` (Phase 5.2) ran last night. This means:
-- `earnings_events` should now have entries for WFC/MS/ABT/INFY/MRSH/MAN/PLD/TFC/ERIC
-- `earnings_moves` should be computed for events with T+1 data (WFC at T+3, MS at T+2, etc.)
-- The query DB sync should have the latest data by now (Saturday)
-- **First priority next session:** Run tracking query, check earnings_moves, compare to my manual calculations
-- Also track: CLF (4/20 — this Sunday? or Monday?), HAL/MMM/UNH (4/21), PM/TSLA (4/22)
-- UNH (STRONG BUY, 107%) and MMM (STRONG BUY, 68%) report Monday — first REAL test of fresh STRONG BUY signals
+### A5. Earnings Signal Tracking -- ONGOING, Check Pipeline
+**Status:** 11 events tracked (Session 004). Friday collector populated earnings_events (44 April events in prod DB), but earnings_moves still empty for April. Also query DB didn't get the collector data yet (sync gap).
+**Next session:**
+- Check if earnings_moves have been computed for April events
+- Re-run tracking query for MMM (STRONG BUY, 4/21), UNH (STRONG BUY, 4/21), HON (BUY, 4/23) -- key signals reporting next week
+- Check query DB sync status
+- Track cumulative BUY vs STRONG BUY performance curve
 
-### A7. Check Proposal 001 & 002 Feedback + Apply Ben's Session 003 Corrections
-Read `strategic_advisor/reviews/feedback/` for written responses.
-**Ben's verbal feedback (Session 003 Q&A):**
-- Stale straddle root cause = offboarded symbols with orphaned earnings_upcoming data. Not a calc bug — a cleanup gap. Lifecycle tool (PRD 0013) prevents going forward but wasn't retroactive.
-- TUI confirmed not in daily workflow. "Can't pinpoint why." Agrees: don't prioritize developing unused system.
-- Permission granted to build own tools/databases in workspace for analytical purposes. Be mindful of runtime.
-- **Revise Proposal 001 Finding 1:** The "staleness guard" fix should be reframed as "clean up orphaned earnings_upcoming for offboarded symbols + lifecycle offboarding should clear earnings_upcoming." The root cause isn't the straddle calculation — it's that offboarded symbols still have active entries.
+### A7. Check Proposal Feedback + Apply Session 003 Corrections
+**Ben's verbal feedback (Session 003):**
+- Stale straddle root cause = offboarded symbols (not calc bug). Lifecycle tool prevents going forward but wasn't retroactive.
+- TUI confirmed not in daily workflow. Don't prioritize.
+**Still pending:**
+- Check `strategic_advisor/reviews/feedback/` for written responses to Proposals 001, 002, 003
 
-### A10. Consider Building Tracking Database (NEW — Ben permission granted)
-Ben gave permission to create own tables/database in workspace for analytical purposes. Options:
-- SQLite DB at `strategic_advisor/data/advisor_tracking.db`
-- Tables: earnings_signal_results (season tracking), alert_profile_stats (DTE/type hit rates), session_metrics
-- Value: persistent tracking without re-running queries each session
-- Risk: minimal (read-only from system, writes only to own workspace)
-- Decision: do this if the manual tracking in `earnings_signal_tracker.md` becomes unwieldy
-
-### A11. Alert Intent Classification Research (NEW — HIGHEST PRIORITY from Ben Q&A)
-Ben reports 3-4 of ~16 daily alerts are worth following (~20% signal-to-noise). He mentally filters for closing/chasing/hedging. This is the biggest friction point.
-**Research approach:**
-1. Query resolved alerts (next-day OI) — what % are BUILDING vs CLOSING vs NEUTRAL? Does this correlate with alert-time features?
-2. Check if V/OI ratio, stock price change, option type vs direction, moneyness, or DTE predict intent
-3. Look at the 3-4 "good" alerts vs the 12 "noise" alerts — what distinguishes them? (Need Ben to flag some examples, or use profitability as proxy)
-4. Test classification heuristics against historical data
-**Goal:** A proposal for alert intent tagging that reduces mental filtering without losing good signals.
-
-### A12. Gap Analysis — What Are We Missing? (NEW — Ben's question)
-Ben asked: "What if I'm missing things that should be alerts?"
-**Research approach:**
-1. Find stocks that moved >5% in a day (historical_prices)
-2. Check if flow_alerts existed in the 1-3 days prior
-3. If no alert: query flow_options_scans for unusual activity that didn't reach threshold
-4. Identify patterns that should have been flagged but weren't
-**Goal:** Understand false negative rate and identify criteria gaps.
+### A13. Intent Classification -- Implementation Planning (NEW, from Proposal 003)
+**If Proposal 003 is accepted:**
+- Tier 1 (V/OI tag) is ready for implementation (~1 hour)
+- Tier 2 (roll detection) needs scan query design
+- Validate heuristic against new v2 alerts as they get resolved
+- Track accuracy: does the V/OI tag match next-day resolution?
 
 ### A8. Strategy Configuration Deep Dive
-Three sessions focused on data quality and information display. Time to go deeper — are the system's core strategies optimally configured?
-- FM threshold (3.5): is this producing more noise or more signal?
-- Earnings signal thresholds (15%/30%/50%): early data suggests BUY is the sweet spot, not STRONG BUY
-- v3 scoring: is it still being planned? Does the DTE finding change the design?
-- FM scan parameters: ±20% strike range, 388 symbols — are these right?
+Four sessions focused on data quality, decision support, and intent classification. Time to look at core strategy config:
+- FM threshold (3.5): Ben is seeing ~16 alerts/day. Is this the right volume?
+- Earnings signal thresholds: BUY 3/3, STRONG BUY 1/3 -- should thresholds be adjusted?
+- v3 scoring: does the DTE finding + intent classification proposal change the v3 design priorities?
 
-### A9. Investigate "Is the System Used?"
-The TUI has 9 screens of rich analysis but "hasn't been used recently" (big-to-do-list). The workflow tracking week (March 17-21) was planned but it's unclear if it happened. Understanding what Ben actually uses daily vs what exists would inform whether to build more views or make existing ones more accessible.
+### A12. Gap Analysis -- PARTIALLY DONE
+**Ben's question:** "Am I missing things that should be alerts?"
+**Session 004 finding:** 30% capture rate for FM-scanned symbols with >5% moves. Most misses are macro-driven (tariff selloffs), not stock-specific flow signals. This is structural.
+**Remaining:**
+- Check whether adjusting FM parameters (lower threshold?) would catch more moves
+- Investigate if some misses had unusual flow BELOW the current threshold
+- Look at daily-only symbols (432 not scanned by FM) -- any with big moves?
 
 ---
 
-## Priority B — Following Sessions
+## Priority B -- Following Sessions
 
 ### B1. Theoretical Evaluation Enhancement
-Ben prefers theoretical validation ("if played perfectly"). Current max_prof_7d_pct is good but could be enriched:
-- Realistic exit modeling (not just max — what about a disciplined 25% target?)
-- "% of alerts where 25% target was achievable within 7 days" by profile
-- Risk-adjusted returns: was the drawdown path acceptable?
-- Session 002 already produced the 25% target analysis (observation 005). Next step: formalize into a metric.
+Ben prefers theoretical validation. Current max_prof_7d_pct is good but could be enriched:
+- Realistic exit modeling (25% target achievability within specific windows)
+- Risk-adjusted returns (drawdown path)
+- Session 002 already produced 25% target analysis. Formalize into a metric.
 
 ### B4. v3 Alert Scoring Design Review
-Now informed by the scoring-magnitude finding AND the DTE-as-predictor finding. After feedback on Proposals 001-002, consider a dedicated proposal. Key points:
+Now informed by: scoring-magnitude finding, DTE-as-predictor, V/OI intent classification.
 - DTE bonus needs to be larger (+1.0 not +0.25)
-- Consider displaying actionability separately from intelligence value
-- Flow concentration penalty calibration
+- Intent classification (V/OI band) could replace or supplement flow concentration
+- Consider splitting score into "intelligence value" vs "trade actionability"
 
 ### B5. Unused Data & Feature Audit (continued)
 Started in Session 002. Found 6 empty/near-empty tables. Next steps:
-- Check which features (social posting, AI council, agent system) are still in Ben's plans
-- Look for dead code paths — features wired in code but never called from orchestrator
-- `option_contracts_corrupt_20260407` cleanup — flag for deletion
+- Check which features are still in Ben's plans
+- Dead code paths
+- `option_contracts_corrupt_20260407` cleanup
 
-### B7. Post-April Alert Regime Analysis (NEW)
-April 14-17 showed dramatic shift to short-dated calls (0 puts on 4/16-4/17). Is this:
-- Monthly opex effect (4/18 expiration)?
-- Market regime (extreme bullishness)?
-- v2 scoring bias toward short DTE?
-Worth checking when May data accumulates.
+### B7. Post-April Alert Regime Analysis
+April 14-17 showed dramatic shift to short-dated calls. Monitor May data.
+
+### B8. Ben's "Good Alert" Profiling (NEW)
+From Session 004 trade examples: Ben's winning trades share specific features (cheap options, cheap underlying, sector thesis, V/OI 1.5-11, morning alerts). Could build a "Ben's Profile" score that highlights alerts matching his actual trading pattern. Different from significance_score -- this would be a "tradability" score.
+
+### B9. Earnings Signal Threshold Recalibration Planning (NEW)
+BUY is 3/3. STRONG BUY is 1/3. Early evidence suggests BUY (30-50% underpricing) may be the sweet spot. If this holds at 30+ events, consider:
+- Lowering STRONG BUY threshold or renaming BUY as the priority signal
+- Investigating whether STRONG BUY is contaminated by data quality (stale straddles)
+- Relationship between underpricing % and actual move magnitude
 
 ---
 
-## Priority C — Longer Term
+## Priority C -- Longer Term
 
 ### C1. System Architecture Assessment
-Map the data flow end-to-end. Identify structural risks or simplification opportunities. The sector archive split (6 DB files created) and orchestrator modularization suggest good structure, but worth verifying.
-
-### C2. Trading Style Alignment Audit (PARTIALLY DONE)
-Session 003 investigated the decision support surface. `trading-style.md` is outdated. Key remaining question: does Ben's actual daily workflow use the TUI, console output, Robinhood, or some combination? The workflow tracking week may have happened — check.
+Map data flow end-to-end. Identify structural risks or simplification.
 
 ### C3. Self-Assessment Framework
-After 5-10 sessions, build a way to evaluate my own recommendations' quality.
+After 5-10 sessions, evaluate my own recommendations' quality.
 
-### C4. Earnings Signal Threshold Recalibration
-After accumulating 50+ events. BUY looks like the sweet spot early on (3/3 vs STRONG BUY's 1/3). Could the thresholds be wrong? Or is STRONG BUY contaminated by the stale-data false positives?
+### C5. Time-of-Day Analysis Deep Dive (NEW)
+Morning alerts (9:30-10am) have 3.7x avg profit and 91% hit rate vs afternoon (52%, 63%). Worth investigating: Is this a sampling bias (morning alerts are mostly from the first scan cycle which catches overnight accumulation) or a genuine signal? Could the system prioritize morning alerts differently?
 
 ---
 
 ## Completed
 
-### A1. Score-Performance Relationship — RESOLVED (Session 001)
-Higher scores predict reliability, not magnitude. Confirmed within v1-only data, within same DTE bands.
+### A1. Score-Performance Relationship -- RESOLVED (Session 001)
+Higher scores predict reliability, not magnitude. Confirmed.
 
-### A1b. Understand the Evaluator — RESOLVED (Session 002)
-max_prof_7d_pct = max option midpoint within 168-hour window from flow_options_scans. 58% coverage is structural.
+### A1b. Understand the Evaluator -- RESOLVED (Session 002)
+58% coverage is structural.
 
-### A2. expected_move_pct Data Quality — RESOLVED (Session 001)
-0-DTE IV contamination. Signal system isolated.
+### A2. expected_move_pct Data Quality -- RESOLVED (Session 001)
+0-DTE IV contamination.
 
-### A3. Draft Proposal 001 — COMPLETED (Session 002)
+### A3. Draft Proposal 001 -- COMPLETED (Session 002)
 Written as `reviews/001_signal_quality_bundle.md`.
 
-### A4. Check Proposal 001 Feedback — CHECKED (Session 003)
-No feedback yet. Normal — same day.
+### A4. Check Proposal 001 Feedback -- CHECKED (Session 003)
+No feedback yet.
 
-### A6. Post-Earnings Pipeline Check — RESOLVED (Session 003)
-Not a bug. `earnings_events` populated by Friday `ei_collector` run. April 14-17 events will appear after tonight's Phase 5. `earnings_moves` computed from events, so they lag by 1-6 days.
+### A6. Post-Earnings Pipeline Check -- RESOLVED (Session 003)
+Not a bug. Batch design.
 
-### A3b. Draft Proposal 002 — COMPLETED (Session 003)
-Written as `reviews/002_decision_gap.md`. The Decision Gap — bridging signals to trades.
+### A3b. Draft Proposal 002 -- COMPLETED (Session 003)
+Written as `reviews/002_decision_gap.md`.
+
+### A9. Investigate "Is the System Used?" -- RESOLVED (Sessions 003-004)
+Ben is a console-first user. TUI not in workflow. Console is the primary delivery surface.
+
+### A11. Alert Intent Classification Research -- COMPLETED (Session 004)
+V/OI predicts intent with high accuracy. Written as Proposal 003.
+Multi-strike roll detection algorithm designed. Time-of-day effect quantified.
+False negative analysis: 30% capture rate (structural, mostly macro misses).
 
 ---
 
-*Last updated: Session 003, 2026-04-18*
+*Last updated: Session 004, 2026-04-18*

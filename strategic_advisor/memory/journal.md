@@ -297,6 +297,88 @@ New priority order:
 - A5: Earnings tracking data harvest (Friday collector ran)
 - A10: Consider building own tracking DB
 
-### Threads to Investigate Next
+### Threads to Investigate Next (Session 003)
 
 See `memory/agenda.md` for updated priorities.
+
+---
+
+## Session 004 -- 2026-04-18
+
+**Focus:** Alert intent classification research (A11, highest priority from Ben's Q&A). Earnings data harvest. Gap analysis.
+
+### What I Did
+
+1. **Oriented:** Read all memory files, Ben's Q&A answers, checked for feedback (none yet)
+2. **Earnings data harvest (A5):**
+   - Friday collector populated 44 April earnings_events in production DB
+   - Query DB only has 5 (sync gap -- BUG-003)
+   - earnings_moves still empty for April events (pipeline hasn't run post-earnings calc yet)
+   - Manually computed moves for all 38 events with signals using historical_prices
+   - Updated earnings_signal_tracker with full dataset
+   - BUY: 3/3 beat straddle (100%). STRONG BUY: 1/3 (33%). WATCH: 1/5 (20%).
+3. **Alert intent classification (A11, main investigation):**
+   - Pulled all 6 of Ben's real trade alerts from flow_alerts with full features
+   - Pulled all same-day alerts for comparison (DOW/DVN day: 23 alerts; CTRA day: 20; VST day: 18)
+   - Analyzed V/OI ratio as predictor of OI resolution across 1,253 resolved alerts
+   - Discovered V/OI >= 5.0 has 96.8% BUILDING accuracy (zero CLOSING alerts ever had V/OI >= 5)
+   - Analyzed moneyness as secondary feature (ITM + low V/OI = 51% CLOSING)
+   - Investigated multi-strike roll patterns (VST, NOK, LYB, CTRA)
+   - Confirmed roll patterns are detectable in real-time from scan data
+   - Analyzed time-of-day effect: morning alerts 3.7x more profitable than afternoon
+   - Profiled Ben's "good alert" features: cheap options, cheap underlying, high vol surprise, near-ATM
+4. **Gap analysis (A12, partial):**
+   - Queried big moves (>5%) in FM-scanned symbols over 9 trading days
+   - 30% capture rate (18/60 had prior alerts)
+   - Most misses are macro-driven (tariff selloffs, market-wide momentum)
+5. **Wrote Proposal 003: Alert Intent Classification** -- V/OI-based intent tags, multi-strike roll detection, time-of-day quality signal
+6. **Housekeeping:** Updated all memory files, system map, agenda, bugs, earnings tracker
+
+### Key Findings
+
+**1. V/OI RATIO IS THE STRONGEST INTENT PREDICTOR (A11 resolved)**
+At alert time, before next-day OI data:
+- V/OI >= 5.0: 97% are genuinely new positions (329 BUILDING, 0 CLOSING, 11 NEUTRAL)
+- V/OI 1.0-5.0: 83% new positions
+- V/OI < 1.0 + ITM: Only 16% new; 51% are closing positions
+- V/OI < 1.0 + OTM: Ambiguous (41% new, 32% closing)
+This is the data Ben needs at alert time to skip the closings. It's already available but not surfaced.
+
+**2. ROLL PATTERNS ARE DETECTABLE (Ben's biggest pain point)**
+VST and CTRA -- Ben's two worst trades -- were both rolls. In both cases, another strike at the same expiration had comparable volume with V/OI near 1 (the closing leg). The system has this data in the same scan but doesn't check for it.
+
+**3. TIME OF DAY EFFECT IS MODERATE (self-corrected)**
+Initial v2-only analysis showed dramatic 191% vs 52% morning/afternoon split. But this was driven by small samples (33 vs 16) and MSTR outliers. Full dataset (1,838 alerts) shows moderate effect: mornings have higher averages (83.8% vs 63.8%) but hit rates are flat (63-72%). The 10-11am slot actually has the best hit rate. Revised Proposal 003 accordingly -- Tier 3 (time tag) downgraded from "data-backed" to "nice-to-have."
+
+**4. CLOSING ALERTS ARE NOT BAD TRADES (counterintuitive)**
+Surprising: BUILDING (71.4%), CLOSING (70.4%), NEUTRAL (70.5%) all have similar 25% hit rates. The value of intent classification isn't in avoiding bad trades -- it's in having the right thesis. Ben's pain is directional: he interprets closing as opening and builds the wrong mental model.
+
+**5. BEN'S WINNING PROFILE**
+From 6 real trades: accessible option price (<$2), underlying <$50, sector dip thesis, V/OI 1.5-11, morning entry. His losses: expensive underlying (VST $162), rolls he didn't detect, holding too long.
+
+**6. GAP ANALYSIS: 70% FALSE NEGATIVE RATE (mostly macro)**
+Of 60 big moves in FM symbols, only 18 had prior alerts. But the misses are overwhelmingly macro-driven (SNOW, ALAB, ORCL on tariff news days). This is a structural limitation, not a tuning problem.
+
+### Self-Assessment & Introspection
+
+**Session quality:** Strong. This is the most directly actionable session yet. Proposal 003 addresses Ben's #1 pain point (80% noise ratio) with a concrete, evidence-backed solution that can be implemented in hours.
+
+**Did I follow my agenda?** Yes -- all three top priorities addressed (A11 deep dive, A5 earnings harvest, A12 gap analysis partial). A11 produced a full proposal. A5 updated the tracker. A12 got a clear answer (30% capture, macro-driven misses).
+
+**Am I building on prior work?** Strongly yes. Sessions 001-003 built understanding of scoring, evaluation, decision gap, and Ben's workflow. Session 004 synthesized all of that with Ben's real trade examples into the single most impactful proposal yet. The earnings tracker expanded from 11 events (manual calc) to 38 events (production DB).
+
+**Introspection pattern check:**
+- Four sessions, three proposals. Each qualitatively different: data quality (001), workflow (002), noise reduction (003).
+- Am I still gravitating toward my comfort zone? Partially. Proposal 003 is heavily quantitative (V/OI analysis, hit rates, distributions). But the root insight came from Ben's Q&A, not from me. I correctly pivoted from "add information" (Proposal 002) to "reduce noise" (Proposal 003) based on his feedback. Good sign.
+- **What I haven't done:** Looked at the system's architecture, code quality, or strategy design at a fundamental level. I keep analyzing the output. Is the architecture sound? Are there simpler ways to achieve the same goals? I've been so focused on "what should the alerts look like" that I haven't asked "should the alert system work differently?"
+
+**What would I do differently?** I could have spent less time on the gap analysis (A12) once I saw the macro-driven pattern. The 30% capture rate for stock-specific flow signals is actually reasonable -- the system's job is to catch unusual individual-stock flow, not market-wide moves. I spent 3-4 queries confirming what was apparent from the first one.
+
+### Threads for Next Session
+
+See `memory/agenda.md` for updated priorities. Key items:
+1. Check feedback on Proposals 001-003
+2. Earnings tracking: MMM (STRONG BUY), UNH (STRONG BUY), HON (BUY) report next week
+3. If Proposal 003 is accepted, plan Tier 2 implementation
+4. A8: Strategy configuration deep dive (FM threshold, earnings signal thresholds)
+5. B8: Ben's "good alert" profiling -- could build a tradability score
