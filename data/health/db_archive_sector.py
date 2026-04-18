@@ -1559,6 +1559,11 @@ def vacuum_production_database():
         with sqlite3.connect(source_path) as conn:
             cursor = conn.cursor()
 
+            # Point SQLite temp files to E: drive — C: drive temp dir is too small
+            # for VACUUM on a 14+ GB database (needs full copy as temp file)
+            data_dir = os.path.join(project_root, 'data')
+            cursor.execute(f"PRAGMA temp_store_directory = '{data_dir}'")
+
             # Get size before VACUUM
             cursor.execute("PRAGMA page_count")
             pages_before = cursor.fetchone()[0]
