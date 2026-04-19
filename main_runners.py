@@ -916,9 +916,14 @@ class OrchestratorRunnersMixin:
 
             if return_code == 0:
                 self.beautiful_log("Morning Views completed successfully", 'success')
+
+                # Launch TUI in a new window if not already running
+                tui_status = self._launch_morning_view_tui()
+
                 self.create_status_box("✅ MORNING VIEWS COMPLETE", [
                     "Watchlist: Generated from today's OI data",
                     "Email: Process completed (check email delivery)",
+                    "TUI: {}".format(tui_status),
                     "Status: ✅ Morning views finished"
                 ])
                 return {'success': True, 'duration_seconds': mv_duration, 'stdout': captured_output}
@@ -956,6 +961,40 @@ class OrchestratorRunnersMixin:
                 "System: Continuing with flow monitor anyway"
             ], success=False)
             return {'success': False, 'duration_seconds': time.time() - mv_start, 'error': str(e)}
+
+    def _launch_morning_view_tui(self):
+        """Launch Morning View TUI in a new console window if not already running.
+
+        Returns status string for the completion box.
+        """
+        try:
+            import psutil
+
+            mv_script = os.path.join(project_root, 'morning_view', 'mv_main.py')
+
+            # Check if TUI is already running
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['name'] in ('python.exe', 'python3.exe', 'python'):
+                        cmdline = proc.info.get('cmdline', [])
+                        if cmdline and any('mv_main.py' in arg for arg in cmdline):
+                            self.beautiful_log("Morning View TUI already running — skipping launch", 'info')
+                            return "Already open (skipped)"
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+
+            # Launch in a new console window (fire-and-forget)
+            subprocess.Popen(
+                [sys.executable, mv_script],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                close_fds=True,
+            )
+            self.beautiful_log("Morning View TUI launched in new window", 'success')
+            return "Launched in new window"
+
+        except Exception as e:
+            self.beautiful_log("Failed to launch TUI: {}".format(e), 'warning')
+            return "Launch failed ({})".format(str(e)[:40])
 
     def run_metadata_collection(self):
         """
