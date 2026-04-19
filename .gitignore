@@ -15,8 +15,6 @@ client_secret_*.json
 *.db-wal
 Deprecated/
 memory/
-!strategic_advisor/memory/
-strategic_advisor/.session_prompt.md
 
 # Sensitive config (contains API keys)
 config.json
@@ -28,6 +26,8 @@ claude.exe
 # Backups (large DB copies)
 backups/
 *.bak
+*_ORIGINAL_BACKUP.py
+*.backup
 
 # OS files
 desktop.ini
@@ -46,3 +46,37 @@ autofix/errors/
 # Claude Code local settings
 .claude/
 plans/
+
+# Strategic Advisor — agent scratchpad (prompt + reviews stay tracked)
+strategic_advisor/memory/
+strategic_advisor/.session_prompt.md
+
+# AI Council — experimental system
+ai_council/
+
+# Generated task lists
+tasks/
+
+# Research scratch work
+research/
+
+# Generated output and reports
+docs/output/
+
+# Oracle AI generated indexes
+oracle/vanna_storage/
+
+# Morning View state files
+morning_view/advisor_config.json
+morning_view/planner_config.json
+morning_view/planner_data.json
+morning_view/Schema_v_*.txt
+
+# Google Drive sync artifacts
+.tmp.driveupload/
+*.gdoc
+
+# Working notes (not source code)
+big-to-do-list.md
+hooks-agents-notes.txt
+PLAN.md

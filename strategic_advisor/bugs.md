@@ -7,21 +7,6 @@ Each entry includes a ready-to-run Claude command when the fix is straightforwar
 
 ## Open
 
-### BUG-001 (2026-04-18) -- Orphaned earnings_upcoming entries for offboarded symbols
-**Severity:** Medium (causes false STRONG BUY signals)
-**Root cause:** Symbols offboarded from the scanner (EXAS, AL, SEE, HOLX, possibly others) still have active entries in `earnings_upcoming`. The lifecycle offboarding tool (PRD 0013) wasn't retroactively applied to these symbols, and their stale option data produces garbage straddle calculations.
-**Impact:** 4 of 15 current BUY/STRONG BUY signals are false positives.
-**Fix options:**
-1. Run lifecycle offboard for each symbol (proper cleanup)
-2. Quick: DELETE from earnings_upcoming WHERE symbol IN (list of offboarded symbols)
-3. Verify the offboarding tool clears earnings_upcoming as part of its flow
-
-**To investigate:** Does `symbol_lifecycle.py --offboard` clean `earnings_upcoming`? Check the offboarding code.
-
-```
-claude -p "Check if tools/symbol_lifecycle.py --offboard cleans up earnings_upcoming entries for the offboarded symbol. If not, add that step. Also identify all symbols currently in earnings_upcoming that are NOT in symbol_metadata (orphaned entries) and remove them."
-```
-
 ### BUG-002 (2026-04-18) -- Offboarded symbol data may not archive properly
 **Severity:** Low (data accumulation, not functional)
 **Root cause:** If offboarding removes a symbol from `symbol_metadata`, and the sector archive process uses `symbol_metadata.archive_db` for routing, then data for offboarded symbols in production tables (option_contracts, flow_options_scans, etc.) may never get archived -- just silently accumulates.
@@ -59,4 +44,6 @@ claude -p "Dead code cleanup in fm_analyzer.py: delete the _check_alert_deduplic
 
 ## Resolved
 
-*(none yet)*
+### BUG-001 (2026-04-18, FIXED 2026-04-18) -- Orphaned earnings_upcoming entries for offboarded symbols
+**Root cause:** Symbols offboarded before PRD 0013 (EXAS, AL, SEE, HOLX, ABEV) had orphaned `earnings_upcoming` entries producing false STRONG BUY signals.
+**Fix:** Ben deleted the 5 orphaned entries from production DB. Lifecycle tool (`--offboard`) already handles this going forward.
