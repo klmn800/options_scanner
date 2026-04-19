@@ -157,6 +157,32 @@ python tools/email_digester.py --dry-run            # Preview without processing
 python tools/email_digester.py --headless           # No visible window
 ```
 
+### Strategic Advisor
+
+An autonomous Claude Opus session that analyzes the system and produces strategic recommendations. Runs daily at 9 PM via Task Scheduler. Read-only — never modifies code or databases outside its own workspace.
+
+```bash
+# Launch interactive session (Ben watches in real-time)
+cd /d E:\options_scanner
+claude --permission-mode bypassPermissions @strategic_advisor\PROMPT.md
+
+# Or via launcher (handles date injection)
+python strategic_advisor/launcher.py
+```
+
+**Key files:**
+- `strategic_advisor/PROMPT.md` — the agent's prompt
+- `strategic_advisor/reviews/` — proposals (numbered: 001, 002, etc.)
+- `strategic_advisor/reviews/feedback/` — Ben's feedback on proposals
+- `strategic_advisor/memory/` — agent's persistent workspace (journal, agenda, observations)
+
+**Proposal review workflow:** When Ben says "let's review the strategic advisor's proposals" or similar:
+1. Check `strategic_advisor/reviews/` for proposals without corresponding feedback files in `strategic_advisor/reviews/feedback/`
+2. Read each unreviewed proposal
+3. Discuss with Ben — get his take on each one
+4. Write feedback to `strategic_advisor/reviews/feedback/{proposal_name}.md` with verdict (approved, declined, deferred, needs revision) and Ben's reasoning
+5. The agent reads feedback at the start of its next session and adjusts its work accordingly
+
 ### Database Archiving and Optimization
 ```bash
 # Sector-based archiving (active system - runs automatically Friday nights)
