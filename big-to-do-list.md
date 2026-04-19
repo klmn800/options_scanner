@@ -109,6 +109,15 @@ Started but not finished. Each has a clear next step.
 
 ## To Do — Not Yet Started
 
+### Agent Systems
+
+#### 9.1 — Pre-Market Analysis Agent
+- **Status:** Idea — low priority, future exploration
+- **Concept:** An autonomous agent session (similar to Strategic Advisor) that runs pre-market, evaluates the day's data (overnight earnings results, pre-market movers, today's earnings calendar, yesterday's alert resolutions, current watchlist state), and produces a plain-English briefing with actionable suggestions for the day.
+- **Complexity:** High — needs to synthesize multiple data sources, understand context, and make judgment calls. Lots of design work needed before building.
+- **Motivation:** Strategic Advisor sessions are proving valuable. A pre-market agent could do the daily "what should I focus on today?" synthesis that currently requires manual review.
+- **Prerequisites:** Strategic Advisor workflow proven and stable. Clear understanding of what data sources the agent needs access to and what "good advice" looks like.
+
 ### Symbol Lifecycle Management
 
 #### 8.3 — Automated Symbol Discovery (Future)

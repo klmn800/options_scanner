@@ -382,3 +382,74 @@ See `memory/agenda.md` for updated priorities. Key items:
 3. If Proposal 003 is accepted, plan Tier 2 implementation
 4. A8: Strategy configuration deep dive (FM threshold, earnings signal thresholds)
 5. B8: Ben's "good alert" profiling -- could build a tradability score
+
+---
+
+## Session 005 — 2026-04-18
+
+**Focus:** Strategy configuration deep dive (A8). Proposal format correction. Architecture investigation.
+
+### What I Did
+
+1. **Oriented:** Read all memory files, checked for feedback (none in `reviews/feedback/`)
+2. **Ben's feedback on proposal format:** Proposals 001-003 read as analysis reports, not work orders. Updated PROMPT.md reinforces: proposals are for developers to pick up and execute. Analysis belongs in observations, proposals should be lean with CLI commands.
+3. **Strategy configuration deep dive (A8):**
+   - Queried April 2026 alert performance by score band, DTE, V/OI, underlying price
+   - Confirmed score-performance inverse holds in v2: 3.5-4.0 band = 145.9% avg vs HIGH 5.0+ = 54.1%
+   - DTE remains strongest predictor: 0-14d = 90.6% hit rate, 248.4% avg
+   - Identified "Ben's profile" alerts (~5-6/day with $175 UL cap): 83% hit rate
+   - Mapped noise composition: 38% expensive UL, 30% mid-range UL, 16% expensive options, 15% puts
+   - MSTR alone = 8.4% of April alerts (16/191)
+4. **Architecture investigation:**
+   - Read v3 scoring design doc end-to-end
+   - Dispatched Explore agent to map full alert pipeline (fm_analyzer.py, fm_alerts.py, fm_config.py)
+   - Mapped v3 integration path: clean — flow_percentage already in data, placeholder slot in return tuple, clear insertion points
+   - **Found BUG-005:** `_check_alert_deduplication()` is dead code — defined in fm_analyzer.py:1014 but never called. Config key `alert_deduplication_hours: 4` also unused. Explains same-contract re-alerts (MSTR $157.5 fired twice in 17 min).
+5. **Wrote Proposal 004:** Tradability highlight — `[ACTIONABLE]` tag for profile-matching alerts. Lean format with CLI command. Updated to $175 UL per Ben's feedback.
+6. **Ben updated trading-style.md:** Position sizing ~$500, primary range ~$160. The config in Proposal 004 makes UL threshold adjustable.
+
+### Key Findings
+
+**1. RAISING THE THRESHOLD WOULD HURT PERFORMANCE (A8 resolved)**
+The 3.5 threshold is correct. The inverse score-profit relationship means raising it would:
+- Cut daily volume from ~16 to ~3 (at 5.0 threshold)
+- But REDUCE average max profit (54.1% for HIGH vs 145.9% for 3.5-4.0)
+- Hit rates are flat across bands (76-83%), so no quality improvement either
+- Noise should be addressed through filtering/tagging, not threshold changes.
+
+**2. BEN'S PROFILE ALERTS ARE ALREADY THERE**
+With UL ≤$175, option ≤$3, call, 7-60d: ~5-6 alerts/day average. Hit rate 83%. They're just buried in the other 10 alerts.
+
+**3. DEAD DEDUPLICATION CODE (BUG-005)**
+`_check_alert_deduplication()` in fm_analyzer.py is defined but never called. The config key `alert_deduplication_hours: 4` exists but is unused. This allows same-contract re-alerts — MSTR $157.5 fired at both 9:40 and 9:57 on 4/17. Wiring this in would cut ~5-10% of daily alerts.
+
+**4. V3 INTEGRATION PATH IS CLEAN**
+The `_calculate_unified_score()` method has clear insertion points:
+- After `base_score = self._calculate_flow_score(...)` → flow concentration multiplier
+- After `unified_score = min(10.0, max(0.0, base_score))` → actionability bonuses
+- Return tuple position 1 is a placeholder (0.0, formerly smart_money) → can hold bonus score
+- `flow_percentage` already available in candidate data
+
+**5. PROPOSAL FORMAT LESSON**
+My first 3 proposals were research papers with proposals buried at the bottom. Going forward: lean work orders citing observation files for evidence. Proposal 004 follows this format.
+
+### Self-Assessment & Introspection
+
+**Session quality:** Good. Finally branched into architecture (as planned in Session 004 introspection). Found dead code (BUG-005) and mapped the v3 integration path. Wrote a properly-formatted proposal. Internalized Ben's format feedback.
+
+**Did I follow my introspection from Session 004?** Partially. I said "Session 005 should look at architecture, code quality, or strategy design at a fundamental level." I did look at architecture (scoring pipeline, dedup code, config structure) but didn't go as deep as a full system architecture assessment. The strategy config deep dive (A8) was the right priority — it directly informs v3 design timing and Ben's daily experience.
+
+**Am I building on prior work?** Yes. Sessions 001-004 established the scoring-magnitude finding, the DTE effect, Ben's profile, and the intent classification. Session 005 validated all of these in v2-only data and synthesized them into a practical recommendation (tradability highlight) plus a clear v3 integration assessment.
+
+**Pattern check:**
+- Five sessions, four proposals. Each different: data quality (001), workflow (002), noise reduction (003), tradability highlight (004).
+- I've now covered: data quality, workflow, intent classification, strategy config, scoring architecture. The major gap remaining is broader system architecture (data flow end-to-end, unused features, simplification opportunities).
+- My proposals are getting leaner. 001 was a research paper. 004 is a work order. Progress.
+
+**What I did well:** Applied Ben's feedback immediately — Proposal 004 is a different document than 001-003. Also found a real bug (dead dedup code) by actually reading the source.
+
+**What I could improve:** Spent time on the Explore agent pipeline map that I could have gotten more concisely by reading specific functions. The agent returned a very thorough summary but I only needed the scoring formula and integration points. Future: use Explore for broad questions, Read for targeted ones.
+
+### Threads for Next Session
+
+See `memory/agenda.md` for updated priorities.

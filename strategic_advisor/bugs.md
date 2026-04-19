@@ -45,16 +45,14 @@ claude -p "Investigate: when a symbol is offboarded via tools/symbol_lifecycle.p
 **Impact:** Ben bought $34 thinking it was directional conviction, but it was a roll from $36 to $34. The system could have detected this by checking adjacent strikes in the same scan.
 **Status:** Addressed in Proposal 003 (Tier 2: Roll Detection).
 
-### BUG-005 (2026-04-18) -- Alert deduplication is dead code
-**Severity:** Medium (causes duplicate alerts, inflates daily alert count)
-**Root cause:** `fm_analyzer.py:1014` defines `_check_alert_deduplication()` — a contract-level dedup that suppresses re-alerts on the same contract within 2 hours unless score jumps 1.5x. But the method is NEVER CALLED from anywhere. The config key `alert_deduplication_hours: 4` also exists but is unused.
-**Evidence:** MSTR $157.5 CALL (Apr 24) alerted at 9:40 (score 5.48) AND at 9:57 (score 6.21) on 2026-04-17. The dedup would have caught this (6.21 < 5.48 * 1.5 = 8.22).
-**Impact:** Same-contract re-alerts inflate daily count. On the MSTR day, 4 alerts were fired but 1-2 were duplicates. Across all April data, estimated 5-10% of alerts are same-contract dupes.
-**Fix:** Wire `_check_alert_deduplication()` into the alert generation path. The method already has a "NOTE TO REVIEWER" comment asking if it's redundant — it's not, it's just not called.
+### BUG-005 (2026-04-18) -- Dead code cleanup: unused deduplication method + config
+**Severity:** Low (dead code, not a bug)
+**What:** `fm_analyzer.py:1014` defines `_check_alert_deduplication()` that is never called. Config key `alert_deduplication_hours: 4` is also unused. These are leftovers from a deliberate design decision — repeated surges on the same contract ARE informative (volume acceleration signal), so dedup was intentionally disabled. The method and config key should be deleted as cleanup.
+**Ben's input:** "That second alert is informative — I want to know when a contract gets another big injection of volume." Confirmed dedup-off was the right call.
 
 ```
 cd /d E:\options_scanner
-claude -p "In fm_analyzer.py, the _check_alert_deduplication() method at line 1014 is defined but never called — it's dead code. Wire it into the alert scoring pipeline so that before a contract is flagged as an alert candidate (significance_score >= 3.5), it checks _check_alert_deduplication(). If the method returns False, skip the alert. The method uses self.storage.get_recent_alerts(hours_back=2) and suppresses duplicates unless the new score is 1.5x the prior score. Also update the config key alert_deduplication_hours (currently 4, unused) to feed the hours_back parameter instead of the hardcoded 2."
+claude -p "Dead code cleanup in fm_analyzer.py: delete the _check_alert_deduplication() method (around line 1014) and the 'NOTE TO REVIEWER' comment above it. It's intentionally unused — repeated surges on the same contract are valuable signal. Also remove the unused config key alert_deduplication_hours from config.json (under flow_monitor). Update the debug log at fm_alerts.py line 76 to remove 'no deduplication window' since that's no longer a notable design choice."
 ```
 
 ---

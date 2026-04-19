@@ -14,7 +14,7 @@ Multi-strategy options scanner that:
 
 ## Who Uses It
 
-**Ben** -- sole user. Buys options (long only, never sells), swing trades (days to weeks), 25% profit target, trades on Robinhood. Portfolio and position sizes have grown significantly -- now trades symbols up to ~$160. `docs/trading-style.md` is outdated (still says $4K / <$300 / <$60). Adjust mental model accordingly.
+**Ben** -- sole user. Buys options (long only, never sells), swing trades (days to weeks), 25% profit target, trades on Robinhood. Position sizing: ~$500/trade. Primary range: stock price up to ~$160 (verbal: "as high as like $175"). `docs/trading-style.md` updated April 2026.
 
 **Ben's actual workflow (Session 003 Q&A):**
 - Console monitor open at day job, watches semi-continuously, scrolls to catch up
@@ -39,7 +39,7 @@ Multi-strategy options scanner that:
 4. Evening -- Backup, Autofix review, Daily Evaluation
 5. Fridays -- Weekly backup, FM baseline, Earnings refresh, Sector archive
 
-## Key Data Points (as of Session 004, 2026-04-18)
+## Key Data Points (as of Session 005, 2026-04-18)
 
 | Metric | Value |
 |--------|-------|
@@ -52,9 +52,11 @@ Multi-strategy options scanner that:
 | Win rate >=25% in 7d (April v2) | 79% |
 | FM cycles/day | 38-40 (full day) |
 | OP symbols collected | 816-819/day |
-| Daily alert volume (April avg) | ~16/day |
+| Daily alert volume (April avg) | ~16/day (range 9-27) |
+| "Ben's profile" alerts/day | ~5-6 (UL≤175, opt≤$3, call, 7-60d) |
+| Profile alert hit rate | 83% (≥25% in 7d) |
 | Earnings events (April, prod DB) | 44 |
-| Earnings signal events tracked | 11 (BUY 3/3, STR BUY 1/3, WATCH 1/5) |
+| Earnings signal events tracked | 38 (BUY 3/3, STR BUY 1/3, WATCH 1/5) |
 
 ## Key Databases
 
@@ -67,7 +69,8 @@ Multi-strategy options scanner that:
 
 - **v1** (Sept 2025 - Mar 2026): threshold 6.0, premium + volume surprise
 - **v2** (Apr 2026): threshold 3.5, removed smart money (was double-counted), HIGH 5.0+
-- **v3** (design phase): two-tier scoring -- fundamental + actionability bonus (V/OI, DTE, price, IV, multi-leg)
+- **v3** (design phase, scheduled May/June 2026): two-tier scoring — fundamental + actionability bonus (V/OI, DTE, price, IV, multi-leg). Integration path mapped (Session 005): clean insertion points in `_calculate_unified_score()`, `flow_percentage` already in data. Key v3 design adjustments needed: DTE bonus should be +1.0 not +0.25, flow concentration penalty is highest-priority change.
+- **Dedup gap:** `_check_alert_deduplication()` is dead code (BUG-005). Should be fixed before or alongside v3.
 
 ## Alert Output (What Ben Sees)
 
@@ -107,13 +110,13 @@ Per alert, one line: Symbol [cap] $strike type (DTE) | Vol: X (Yx) | OI: X | V/O
 | < 1.0 + ITM | 15.6% | Most likely closing (profit-taking) |
 | < 1.0 + OTM | 41.2% | Ambiguous |
 
-## Known Data Quality Issues (as of Session 004)
+## Known Data Quality Issues (as of Session 005)
 
 1. **Stale straddle -> false STRONG BUY signals** (CRITICAL): 4/15 BUY/STRONG BUY signals from stale data. Root cause: offboarded symbols with orphaned earnings_upcoming entries.
 2. **0-DTE IV -> inflated expected_move_pct** (LOW): 29% of events have impossible values. Signal system isolated.
-3. **Scoring predicts reliability, not magnitude** (IMPORTANT): Not a bug but a design property.
-4. **Decision Gap** (DESIGN): System excels at discovery, thin on decision support.
-5. **No intent classification at alert time** (NEW): V/OI and moneyness predict BUILDING vs CLOSING with high accuracy. See Proposal 003.
+3. **Scoring predicts reliability, not magnitude** (IMPORTANT): Not a bug but a design property. Confirmed in v2: 3.5-4.0 band = 145.9% avg vs HIGH 5.0+ = 54.1%.
+4. **No intent classification at alert time**: V/OI and moneyness predict BUILDING vs CLOSING with high accuracy. See Proposal 003.
+5. **Alert deduplication is dead code** (BUG-005): `_check_alert_deduplication()` defined but never called. ~5-10% of daily alerts are same-contract re-alerts.
 
 ## Potentially Unused Features
 
@@ -143,4 +146,4 @@ Per alert, one line: Symbol [cap] $strike type (DTE) | Vol: X (Yx) | OI: X | V/O
 
 ---
 
-*Last updated: Session 004, 2026-04-18*
+*Last updated: Session 005, 2026-04-18*
