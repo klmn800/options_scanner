@@ -15,10 +15,12 @@ Author: Ben (with assistance from Claude)
 Date: 2025-06-29
 """
 
+import json
 import logging
 import sys
 import smtplib
 import os
+from datetime import datetime
 from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -73,20 +75,26 @@ class FMAlerts:
         self._social_notifier = None
         self._social_enabled = self.config.config.get('social_posting', {}).get('enabled', False)
 
-        logging.debug("FM Alerts initialized with delta-based volume surge detection (no deduplication window)")
+        logging.debug("FM Alerts initialized with delta-based volume surge detection")
         self._ensure_analyst_context_column()
         self._ensure_scan_interval_column()
     
-    def process_alerts(self, scan_timestamp, test_mode=False):
+    def process_alerts(self, scan_timestamp, test_mode=False, scan_contracts=None):
         """Main entry point - process alerts for a specific scan
 
         Args:
             scan_timestamp: ISO timestamp string for scan to process
+            test_mode: Whether this is a test run
+            scan_contracts: Optional list of all contract dicts from the current scan
+                           (used by roll detection to find counterpart legs)
 
         Returns:
             dict: Statistics summary
         """
         logging.info("Processing alerts for scan: {}".format(scan_timestamp))
+
+        # Store scan contracts for roll detection
+        self._scan_contracts = scan_contracts
 
         # Reset stats for this run
         self.stats = {key: 0 for key in self.stats}
@@ -144,6 +152,27 @@ class FMAlerts:
 
             unique_alerts = passed_candidates
             logging.debug("Processing {} unique alerts after delta filter".format(len(unique_alerts)))
+
+            # Step 4b: Roll detection — tag alerts that are part of position rolls
+            roll_config = self.config.get_roll_detection_config()
+            if roll_config.get('enabled', True) and self._scan_contracts:
+                rolls_found = 0
+                for alert in unique_alerts:
+                    roll_detected, counterpart_details = self._detect_roll(
+                        alert, self._scan_contracts, roll_config)
+                    alert['roll_detected'] = roll_detected
+                    alert['roll_counterpart_details'] = counterpart_details
+                    if roll_detected:
+                        rolls_found += 1
+                if rolls_found:
+                    logging.info("Roll detection: {} of {} alerts tagged as possible rolls".format(
+                        rolls_found, len(unique_alerts)))
+            else:
+                if not self._scan_contracts:
+                    logging.debug("Roll detection skipped: no scan contracts available")
+                for alert in unique_alerts:
+                    alert['roll_detected'] = False
+                    alert['roll_counterpart_details'] = None
 
             # Step 5: Compute scan interval (once per cycle, shared across all alerts)
             scan_interval_seconds = self._compute_scan_interval(scan_timestamp)
@@ -378,12 +407,119 @@ class FMAlerts:
         logging.info("\U0001f4ca SUMMARY: {} alerts saved ({} HIGH, {} MEDIUM, {} LOW) to flow_alerts".format(
             len(alerts), len(high_alerts), len(medium_alerts), len(low_alerts)))
     
+    def _detect_roll(self, alert, scan_contracts, config):
+        """Detect if an alert is part of a position roll (closing one strike, opening another).
+
+        Searches the current scan's contract data for a counterpart leg with matching
+        volume and divergent V/OI. See PRD 0014 for full algorithm specification.
+
+        Args:
+            alert: Alert candidate dict with keys: symbol, strike, option_type,
+                   expiration_date, volume, open_interest
+            scan_contracts: List of all contract dicts from the current scan
+            config: Roll detection config dict from get_roll_detection_config()
+
+        Returns:
+            tuple: (roll_detected: bool, counterpart_details: dict or None)
+        """
+        alert_symbol = alert.get('symbol')
+        alert_type = alert.get('option_type')
+        alert_strike = alert.get('strike')
+        alert_exp = alert.get('expiration_date')
+        alert_volume = alert.get('volume', 0)
+        alert_oi = alert.get('open_interest', 0)
+
+        if not alert_symbol or not alert_volume or alert_volume <= 0:
+            return (False, None)
+
+        # Parse alert expiration for cross-expiration comparison
+        try:
+            alert_exp_date = datetime.strptime(alert_exp, '%Y-%m-%d')
+        except (ValueError, TypeError):
+            logging.debug("Roll detection: cannot parse expiration '{}' for {}".format(alert_exp, alert_symbol))
+            return (False, None)
+
+        exp_window = config.get('expiration_window_days', 30)
+        vol_threshold = config.get('vol_match_threshold', 0.85)
+        voi_threshold = config.get('voi_closing_threshold', 1.5)
+
+        best_match = None
+        best_vol_ratio = 0.0
+
+        for contract in scan_contracts:
+            # Filter: same symbol
+            if contract.get('symbol') != alert_symbol:
+                continue
+            # Filter: same option type
+            c_type = contract.get('option_type')
+            if c_type != alert_type:
+                continue
+            # Filter: different strike
+            c_strike = contract.get('strike')
+            if c_strike == alert_strike:
+                continue
+            # Filter: volume > 0
+            c_volume = contract.get('volume', 0)
+            if not c_volume or c_volume <= 0:
+                continue
+
+            # Pre-filter: volume within 50-200% range
+            vol_min = min(alert_volume, c_volume)
+            vol_max = max(alert_volume, c_volume)
+            if vol_min / vol_max < 0.50:
+                continue
+
+            # Filter: expiration within window
+            c_exp = contract.get('expiration_date')
+            try:
+                c_exp_date = datetime.strptime(c_exp, '%Y-%m-%d')
+            except (ValueError, TypeError):
+                continue
+            if abs((c_exp_date - alert_exp_date).days) > exp_window:
+                continue
+
+            # Scoring
+            vol_match_ratio = vol_min / vol_max
+            if vol_match_ratio < vol_threshold:
+                continue
+
+            # V/OI check — at least one leg must have V/OI < threshold
+            c_oi = contract.get('open_interest', 0)
+            voi_alert = alert_volume / max(alert_oi, 1)
+            voi_counterpart = c_volume / max(c_oi, 1)
+
+            if min(voi_alert, voi_counterpart) >= voi_threshold:
+                continue
+
+            # This contract qualifies — check if it's the best match
+            if vol_match_ratio > best_vol_ratio or (
+                vol_match_ratio == best_vol_ratio and best_match is not None and
+                voi_counterpart < best_match['_voi_counterpart']
+            ):
+                best_vol_ratio = vol_match_ratio
+                best_match = {
+                    'counterpart_strike': float(c_strike),
+                    'counterpart_expiration': c_exp,
+                    'vol_match_ratio': round(vol_match_ratio, 2),
+                    'alert_voi': round(voi_alert, 2),
+                    'counterpart_voi': round(voi_counterpart, 2),
+                    'role': 'opening' if voi_alert >= voi_counterpart else 'closing',
+                    '_voi_counterpart': voi_counterpart,  # internal, stripped before return
+                }
+
+        if best_match:
+            # Remove internal key before returning
+            best_match.pop('_voi_counterpart', None)
+            return (True, best_match)
+
+        return (False, None)
+
     def _format_console_alert(self, alert):
         """Format single alert for console display
-        
+
         Args:
             alert: Alert dictionary
-            
+
         Returns:
             str: Formatted alert string
         """
@@ -422,9 +558,34 @@ class FMAlerts:
                              if market_cap and market_cap != 'unknown'
                              else 'UNK')
 
-        alert_line = "{} [{}] ${} {}s ({}d) | Vol: {} | OI: {:,} | V/OI: {:.1f} | Last: ${:.2f} | Underlying: ${:.2f} | IV: {:.0f}% | IVP: {} | Score: {:.1f} | Flow: {:.1f}%".format(
+        # Build roll tag if detected
+        roll_tag = ""
+        if alert.get('roll_detected') and alert.get('roll_counterpart_details'):
+            rd = alert['roll_counterpart_details']
+            c_strike = rd.get('counterpart_strike', '?')
+            c_strike_str = "${:.0f}".format(c_strike) if isinstance(c_strike, (int, float)) and c_strike == int(c_strike) else "${}".format(c_strike)
+            role = rd.get('role', 'opening')
+            c_exp = rd.get('counterpart_expiration', '')
+            alert_exp = alert.get('expiration_date', '')
+
+            # Determine if cross-expiration
+            exp_suffix = ""
+            if c_exp and alert_exp and c_exp != alert_exp:
+                try:
+                    exp_dt = datetime.strptime(c_exp, '%Y-%m-%d')
+                    exp_suffix = " {}".format(exp_dt.strftime('%m/%d'))
+                except (ValueError, TypeError):
+                    pass
+
+            if role == 'closing':
+                roll_tag = " [ROLL? closing -> {}{}]".format(c_strike_str, exp_suffix)
+            else:
+                roll_tag = " [ROLL? from {}{}]".format(c_strike_str, exp_suffix)
+
+        alert_line = "{} [{}]{} ${} {}s ({}d) | Vol: {} | OI: {:,} | V/OI: {:.1f} | Last: ${:.2f} | Underlying: ${:.2f} | IV: {:.0f}% | IVP: {} | Score: {:.1f} | Flow: {:.1f}%".format(
             symbol,
             market_cap_display,
+            roll_tag,
             strike,
             option_type,
             dte,
@@ -738,9 +899,30 @@ class FMAlerts:
                     base_reason = "TEST MODE - " + base_reason
 
                 enhanced_reason = base_reason
+
+                # Prepend roll tag to reason if detected
+                if alert.get('roll_detected') and alert.get('roll_counterpart_details'):
+                    rd = alert['roll_counterpart_details']
+                    roll_strike = rd.get('counterpart_strike', '?')
+                    # Format: v2|ROLL?$170|score:... or v2|ROLL?$170 04/17|score:...
+                    roll_tag = "ROLL?${}".format(int(roll_strike) if roll_strike == int(roll_strike) else roll_strike)
+                    c_exp = rd.get('counterpart_expiration', '')
+                    alert_exp = alert.get('expiration_date', '')
+                    if c_exp and alert_exp and c_exp != alert_exp:
+                        try:
+                            exp_dt = datetime.strptime(c_exp, '%Y-%m-%d')
+                            roll_tag += " {}/{}".format(exp_dt.strftime('%m'), exp_dt.strftime('%d'))
+                        except (ValueError, TypeError):
+                            pass
+                    # Insert after v2| prefix
+                    if enhanced_reason.startswith('v2|'):
+                        enhanced_reason = "v2|{}|{}".format(roll_tag, enhanced_reason[3:])
+                    else:
+                        enhanced_reason = "{}|{}".format(roll_tag, enhanced_reason)
+
                 if analyst_context:
                     enhanced_reason += " + {}".format(analyst_context)
-                
+
                 # Prepare COMPLETE alert record with all contract data
                 alert_record = {
                     # Alert Identity
@@ -803,6 +985,10 @@ class FMAlerts:
 
                     # IV context
                     'iv_percentile_30d': alert.get('iv_percentile_30d'),
+
+                    # Roll detection
+                    'roll_detected': 1 if alert.get('roll_detected') else 0,
+                    'roll_counterpart_details': json.dumps(alert['roll_counterpart_details']) if alert.get('roll_counterpart_details') else None,
 
                     # Metadata
                     'alert_sent': True,

@@ -164,7 +164,10 @@ class FMAnalyzer:
         try:
             # Step 1: Get contracts from this scan with baseline data
             contracts_data = self._get_contracts_with_baselines(scan_timestamp)
-            
+
+            # Store raw scan contracts for downstream use (e.g., roll detection in fm_alerts.py)
+            self.last_scan_contracts = contracts_data
+
             if not contracts_data:
                 logging.warning("No contracts found for scan_timestamp: {}".format(scan_timestamp))
                 return self.analysis_stats
@@ -1011,50 +1014,6 @@ class FMAnalyzer:
 
         return deltas
 
-    def _check_alert_deduplication(self, contract, unified_score):
-        """Check if this alert should be suppressed due to recent similar alerts
-        
-        ### NOTE TO REVIEWER - IS THIS REDUNDANT? DOES FM ALERTS DO THIS ALREADY?
-        Args:
-            contract: Contract data dictionary
-            unified_score: Calculated unified score
-            
-        Returns:
-            bool: True if alert should be sent, False if duplicate
-        """
-        try:
-            # Get recent alerts for this symbol/strike/expiration
-            recent_alerts = self.storage.get_recent_alerts(hours_back=2)
-            
-            symbol = contract['symbol']
-            strike = contract['strike']
-            expiration = contract['expiration_date']
-            option_type = contract['option_type']
-            
-            # Check for exact match in recent alerts
-            for alert in recent_alerts:
-                if (alert['symbol'] == symbol and 
-                    alert['strike'] == strike and
-                    alert['expiration_date'] == expiration and
-                    alert['option_type'] == option_type):
-                    
-                    # Enhanced deduplication logic with proper None handling
-                    prior_score = alert.get('significance_score')
-                    if prior_score is None or prior_score <= 0:
-                        continue  # Skip invalid prior scores
-                    
-                    # Suppress if recent alert exists unless score significantly higher
-                    if unified_score < prior_score * 1.5:
-                        logging.debug("Suppressing duplicate alert for {} {} {} (recent score: {:.1f}, current: {:.1f})".format(
-                            symbol, strike, option_type, prior_score, unified_score))
-                        return False
-            
-            return True
-            
-        except Exception as e:
-            logging.debug("Error checking alert deduplication: {}".format(e))
-            return True  # Default to allowing alert if check fails
-           
     def _get_market_regime(self):
         """Get current market regime with improved date filtering
         
