@@ -680,7 +680,8 @@ def run_pipeline(collector, analyzer, alerts, storage, symbols, force=False, tes
         if scan_timestamp:
             logging.info("Collection complete: {}".format(scan_timestamp))
             analyzer.analyze(scan_timestamp, test_mode=test_mode)
-            alerts.process_alerts(scan_timestamp, test_mode=test_mode)
+            alerts.process_alerts(scan_timestamp, test_mode=test_mode,
+                                  scan_contracts=getattr(analyzer, 'last_scan_contracts', None))
             # Memory logging handled by performance tracker if available
         else:
             logging.warning("Collection failed or aborted.")
@@ -1447,7 +1448,8 @@ def run_market_hours():
                 print("")
                 beautiful_log("Starting FM Alerts", 'info')
                 alert_start = time.time()
-                alerts.process_alerts(scan_timestamp)
+                alerts.process_alerts(scan_timestamp,
+                                      scan_contracts=getattr(analyzer, 'last_scan_contracts', None))
                 alert_elapsed = time.time() - alert_start
 
                 # Count alerts actually generated this cycle (after process_alerts creates them)
@@ -2229,7 +2231,8 @@ def main():
             return
         logging.info("ANALYZE ONLY MODE: Timestamp {}".format(ts))
         analyzer.analyze(ts)
-        alerts.process_alerts(ts)
+        alerts.process_alerts(ts,
+                              scan_contracts=getattr(analyzer, 'last_scan_contracts', None))
 
     else:
         parser.print_help()

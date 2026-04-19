@@ -184,6 +184,31 @@ class FMConfig:
 
         return defaults
 
+    def get_roll_detection_config(self):
+        """Return roll detection configuration for identifying position rolls
+
+        Detects when an alert's volume pattern matches a position roll
+        (closing one strike, opening another). Tags alerts with context
+        rather than suppressing them.
+
+        Returns:
+            dict: Roll detection configuration with keys:
+                - enabled: Enable roll detection (default: True)
+                - vol_match_threshold: Min volume match ratio to flag as roll (default: 0.85)
+                - voi_closing_threshold: V/OI below this indicates closing leg (default: 1.5)
+                - expiration_window_days: Max days between expirations for cross-exp rolls (default: 30)
+        """
+        defaults = {
+            'enabled': True,
+            'vol_match_threshold': 0.85,
+            'voi_closing_threshold': 1.5,
+            'expiration_window_days': 30,
+        }
+
+        roll_params = self.flow_monitor_config.get('roll_detection', {})
+        defaults.update(roll_params)
+
+        return defaults
 
 
 # Quick Test

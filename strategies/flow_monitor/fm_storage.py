@@ -57,6 +57,8 @@ class FlowMonitorStorage:
         """Add columns that may not exist yet (idempotent migrations)."""
         migrations = [
             "ALTER TABLE flow_alerts ADD COLUMN iv_percentile_30d REAL",
+            "ALTER TABLE flow_alerts ADD COLUMN roll_detected BOOLEAN DEFAULT 0",
+            "ALTER TABLE flow_alerts ADD COLUMN roll_counterpart_details TEXT",
         ]
         try:
             conn = sqlite3.connect(self.datalake_path)
@@ -366,8 +368,9 @@ class FlowMonitorStorage:
                     max_loss_1d_pct, max_loss_3d_pct, max_loss_7d_pct, max_loss_14d_pct, max_loss_30d_pct,
                     days_to_max_loss, evaluation_status, final_quality_score, last_evaluated_date,
                     contract_hash, scan_interval_seconds,
-                    iv_percentile_30d
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    iv_percentile_30d,
+                    roll_detected, roll_counterpart_details
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             '''
             
             # Clean all decimal values using our formatter
@@ -422,7 +425,9 @@ class FlowMonitorStorage:
                     alert_data.get('option_type', '').upper()
                 ),
                 cleaned_data.get('scan_interval_seconds'),
-                cleaned_data.get('iv_percentile_30d')
+                cleaned_data.get('iv_percentile_30d'),
+                cleaned_data.get('roll_detected', 0),
+                cleaned_data.get('roll_counterpart_details')
             )
             
             cursor.execute(insert_sql, values)
