@@ -9,6 +9,7 @@ Usage:
     python tools/symbol_lifecycle.py --add ACME          # Onboard a new symbol
     python tools/symbol_lifecycle.py --offboard ACME     # Move to purgatory
     python tools/symbol_lifecycle.py --restore ACME      # Restore from purgatory
+    python tools/symbol_lifecycle.py --move-tier ACME    # Change tier (fm_universe <-> daily_only)
     python tools/symbol_lifecycle.py --list              # Universe dashboard
     python tools/symbol_lifecycle.py --review            # Review pending suspects
 
@@ -36,6 +37,12 @@ def cmd_add(symbol):
     """Onboard a new symbol to the universe."""
     from tools.lifecycle.onboarding import onboard_symbol
     onboard_symbol(symbol, get_db_path())
+
+
+def cmd_move_tier(symbol):
+    """Change a symbol's tier (fm_universe <-> daily_only)."""
+    from tools.lifecycle.offboarding import move_tier
+    move_tier(symbol, get_db_path())
 
 
 def cmd_offboard(symbol):
@@ -71,6 +78,7 @@ Examples:
   %(prog)s --add ACME          Onboard ACME with interactive prompts
   %(prog)s --offboard ACME     Move ACME to purgatory
   %(prog)s --restore ACME      Restore ACME from purgatory
+  %(prog)s --move-tier ACME    Change tier (fm_universe <-> daily_only)
   %(prog)s --list              Show universe dashboard
   %(prog)s --review            Review pending lifecycle actions
         """)
@@ -79,6 +87,7 @@ Examples:
     group.add_argument('--add', metavar='SYMBOL', help='Onboard a new symbol')
     group.add_argument('--offboard', metavar='SYMBOL', help='Move symbol to purgatory')
     group.add_argument('--restore', metavar='SYMBOL', help='Restore symbol from purgatory')
+    group.add_argument('--move-tier', metavar='SYMBOL', help='Change tier (fm_universe <-> daily_only)')
     group.add_argument('--list', action='store_true', help='Show universe dashboard')
     group.add_argument('--review', action='store_true', help='Review pending suspects')
 
@@ -90,6 +99,8 @@ Examples:
         cmd_offboard(args.offboard.upper())
     elif args.restore:
         cmd_restore(args.restore.upper())
+    elif args.move_tier:
+        cmd_move_tier(args.move_tier.upper())
     elif args.list:
         cmd_list()
     elif args.review:

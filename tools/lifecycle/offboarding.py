@@ -128,6 +128,97 @@ def offboard_symbol(symbol, db_path):
     print('  Production data will archive naturally on next Friday cycle.')
 
 
+def move_tier(symbol, db_path):
+    """Change a symbol's tier between fm_universe and daily_only.
+
+    Steps:
+      1. Confirm symbol exists and is in fm_universe or daily_only
+      2. Show current status and offer the other tier
+      3. Prompt for reason
+      4. UPDATE symbol_metadata
+      5. Log tier_changed event
+
+    Args:
+        symbol: Stock ticker (already uppercased)
+        db_path: Path to datalake.db
+    """
+    symbol = symbol.upper()
+
+    with sqlite3.connect(db_path, timeout=30.0) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            'SELECT symbol, company_name, universe_tier, sector, industry, protected_reason '
+            'FROM symbol_metadata WHERE symbol = ?',
+            (symbol,)
+        ).fetchone()
+
+    if not row:
+        print(f'Symbol {symbol} not found in symbol_metadata.')
+        return
+
+    current_tier = row['universe_tier']
+    name = row['company_name'] or symbol
+    protected = row['protected_reason']
+
+    if current_tier not in ('fm_universe', 'daily_only'):
+        print(f'{symbol} ({name}) is in {current_tier} — use --restore or --offboard instead.')
+        return
+
+    new_tier = 'daily_only' if current_tier == 'fm_universe' else 'fm_universe'
+
+    # Show current status
+    print(f'\n  {symbol} — {name}')
+    print(f'  Current tier:  {current_tier}')
+    print(f'  New tier:      {new_tier}')
+    print(f'  Sector:        {row["sector"] or "N/A"}')
+    print(f'  Industry:      {row["industry"] or "N/A"}')
+    if protected:
+        print(f'  Protected:     {protected}')
+
+    # Confirm
+    if not prompt_yes_no(f'Move {symbol} from {current_tier} to {new_tier}?'):
+        print('Cancelled.')
+        return
+
+    # Reason
+    reason = prompt_text('Reason for tier change')
+    if not reason:
+        reason = 'No reason provided'
+
+    today = now_eastern().strftime('%Y-%m-%d')
+
+    with sqlite3.connect(db_path, timeout=30.0) as conn:
+        conn.execute(
+            'UPDATE symbol_metadata SET universe_tier = ?, tier_changed_date = ?, '
+            'notes = COALESCE(notes || \'; \', \'\') || ? '
+            'WHERE symbol = ?',
+            (new_tier, today, f'Tier changed {today}: {current_tier} -> {new_tier}: {reason}', symbol)
+        )
+        conn.commit()
+
+    # Log event
+    event_id = log_lifecycle_event(
+        db_path=db_path,
+        symbol=symbol,
+        event_type='tier_changed',
+        tier=new_tier,
+        reason=reason,
+        operator='human',
+        metadata_dict={
+            'previous_tier': current_tier,
+            'new_tier': new_tier,
+        }
+    )
+
+    print(f'\nMoved {symbol} from {current_tier} to {new_tier}. Event ID: {event_id}')
+    if new_tier == 'daily_only':
+        print('  Symbol will no longer appear in FM intraday scans.')
+        print('  OP/EI daily collection continues normally.')
+    else:
+        print('  Symbol will now be included in FM intraday scans.')
+        print('  Tip: FM baseline will update automatically on next Friday cycle.')
+
+
 def restore_symbol(symbol, db_path):
     """Restore a symbol from purgatory back to active universe.
 
