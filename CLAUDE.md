@@ -115,6 +115,7 @@ python tools/news_sentiment.py --budget                 # Check API calls remain
 python tools/symbol_lifecycle.py --add ACME       # Onboard new symbol (interactive)
 python tools/symbol_lifecycle.py --offboard ACME  # Move to purgatory
 python tools/symbol_lifecycle.py --restore ACME   # Restore from purgatory
+python tools/symbol_lifecycle.py --move-tier ACME # Change tier (fm_universe <-> daily_only)
 python tools/symbol_lifecycle.py --list           # Universe dashboard
 python tools/symbol_lifecycle.py --review         # Review pending suspects
 ```
