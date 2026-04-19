@@ -151,6 +151,8 @@ def main():
     )
     parser.add_argument('--headless', action='store_true',
                         help='Run headless (no visible window)')
+    parser.add_argument('--prepare-only', action='store_true',
+                        help='Write session prompt and exit (for batch file use)')
 
     args = parser.parse_args()
 
@@ -191,7 +193,10 @@ def main():
     print(f"  Reviews: {REVIEWS_DIR}")
     print()
 
-    if args.headless:
+    if args.prepare_only:
+        print(f"Session prompt written to: {session_prompt}")
+        print("Ready for: claude --permission-mode bypassPermissions @strategic_advisor\\.session_prompt.md")
+    elif args.headless:
         success, output = spawn_headless(session_prompt)
         if output:
             print(f"\n{'=' * 50}")
