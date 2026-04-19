@@ -177,11 +177,12 @@ python strategic_advisor/launcher.py
 - `strategic_advisor/memory/` — agent's persistent workspace (journal, agenda, observations)
 
 **Proposal review workflow:** When Ben says "let's review the strategic advisor's proposals" or similar:
-1. Check `strategic_advisor/reviews/` for proposals without corresponding feedback files in `strategic_advisor/reviews/feedback/`
-2. Read each unreviewed proposal
+1. Read `strategic_advisor/reviews/INDEX.md` — shows all proposals and their status (PENDING = unreviewed)
+2. Read each PENDING proposal
 3. Discuss with Ben — get his take on each one
-4. Write feedback to `strategic_advisor/reviews/feedback/{proposal_name}.md` with verdict (approved, declined, deferred, needs revision) and Ben's reasoning
-5. The agent reads feedback at the start of its next session and adjusts its work accordingly
+4. Write feedback to `strategic_advisor/reviews/feedback/{proposal_name}.md` with verdict and Ben's reasoning
+5. Update `INDEX.md` with the new status (APPROVED, DECLINED, DEFERRED, IMPLEMENTED)
+6. The agent reads feedback at the start of its next session and adjusts its work accordingly
 
 ### Database Archiving and Optimization
 ```bash
