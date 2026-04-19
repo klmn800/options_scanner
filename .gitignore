@@ -47,9 +47,8 @@ autofix/errors/
 .claude/
 plans/
 
-# Strategic Advisor — agent scratchpad (prompt + reviews stay tracked)
-strategic_advisor/memory/
-strategic_advisor/.session_prompt.md
+# Strategic Advisor — development tool, not part of the product
+strategic_advisor/
 
 # AI Council — experimental system
 ai_council/
