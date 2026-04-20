@@ -1229,10 +1229,13 @@ class OrchestratorRunnersMixin:
             return result
 
     def _render_earnings_watchlist(self, watchlist_symbols):
-        """Render earnings watchlist as box-drawing table via print().
+        """Render earnings watchlist as box-drawing tables via print().
 
-        Uses double-line box characters (╔═╦╗║╠╬╣╚═╩╝) matching the status boxes.
-        Fits within 120-char terminal width (~105 chars with indent).
+        Splits rows into pre-earnings (UPCOMING/TODAY) and post-earnings (T+1/T+2/T+3)
+        tables with different column layouts. Post-earnings table shows outcome data
+        enriched from earnings_events. Season scorecard shown below post-earnings table.
+
+        Uses double-line box characters matching the status boxes.
 
         Args:
             watchlist_symbols: List of row dicts from earnings_watchlist
@@ -1241,10 +1244,28 @@ class OrchestratorRunnersMixin:
             print("  No earnings watchlist entries")
             return
 
+        # Split into pre and post earnings
+        pre_rows = []
+        post_rows = []
+        for row in watchlist_symbols:
+            status = (row.get('status') or '').upper()
+            if status.startswith('T+'):
+                post_rows.append(row)
+            else:
+                pre_rows.append(row)
+
+        # ── Pre-earnings table (existing 12-column layout) ──
+        if pre_rows:
+            self._render_pre_earnings_table(pre_rows)
+
+        # ── Post-earnings table (8-column outcome layout) ──
+        if post_rows:
+            self._render_post_earnings_table(post_rows)
+
+    def _render_pre_earnings_table(self, rows):
+        """Render pre-earnings table (UPCOMING/TODAY) with decision-focused columns."""
         print("")
 
-        # Column definitions: (header, width, align)
-        # Layout: identity → decision → signal components → context → directional
         cols = [
             ("Sym",      6, "<"),
             ("Days",     4, ">"),
@@ -1259,7 +1280,6 @@ class OrchestratorRunnersMixin:
             ("OI Bal",   8, "<"),
             ("Vol Bal",  8, "<"),
         ]
-        # Balance text abbreviations
         _oi_abbrev = {
             'Clear Call Bias': 'Clr Call',
             'Heavy Call': 'Hvy Call',
@@ -1289,14 +1309,11 @@ class OrchestratorRunnersMixin:
                     cells.append(" {:>{}} ".format(val, w))
             return "\u2551" + "\u2551".join(cells) + "\u2551"
 
-        # Top border
         print(hline("\u2554", "\u2566", "\u2557"))
-        # Header row
         print(trow([h for h, _, _ in cols]))
-        # Header separator
         print(hline("\u2560", "\u256c", "\u2563"))
 
-        for row in watchlist_symbols:
+        for row in rows:
             days = row.get('days_to_earnings')
             days_str = "{}d".format(days) if days is not None else "-"
             time_str = (row.get('earnings_time') or '-')[:4]
@@ -1324,9 +1341,162 @@ class OrchestratorRunnersMixin:
                 hist_str, strd_str, iv_str, iv_chg_str,
                 price_str, oi_str, vol_str]))
 
-        # Bottom border
         print(hline("\u255a", "\u2569", "\u255d"))
-        print("{} symbols on watchlist".format(len(watchlist_symbols)))
+        print("{} upcoming".format(len(rows)))
+        print("")
+
+    def _render_post_earnings_table(self, rows):
+        """Render post-earnings table (T+1/T+2/T+3) with outcome-focused columns.
+
+        Enriches rows with outcome data from earnings_events via LEFT JOIN on
+        symbol + earnings_date. Shows scorecard summary below the table.
+        """
+        import sqlite3
+
+        # Enrich with outcome data from earnings_events
+        outcome_map = {}
+        try:
+            db_path = os.path.join('data', 'datalake.db')
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # Build lookup: (symbol, earnings_date) -> outcome dict
+            symbols = [r.get('symbol') for r in rows if r.get('symbol')]
+            if symbols:
+                placeholders = ','.join('?' for _ in symbols)
+                cursor.execute("""
+                    SELECT symbol, earnings_date,
+                           actual_move_1day_pct, actual_max_move_pct,
+                           move_vs_expected_pct, iv_collapse_pct
+                    FROM earnings_events
+                    WHERE symbol IN ({})
+                    AND earnings_date >= date('now', '-10 days')
+                """.format(placeholders), symbols)
+                for erow in cursor.fetchall():
+                    key = (erow['symbol'], erow['earnings_date'])
+                    outcome_map[key] = dict(erow)
+
+            # Season scorecard query — current quarter
+            quarter_month = ((now_eastern().month - 1) // 3) * 3 + 1
+            quarter_start = "{}-{:02d}-01".format(now_eastern().year, quarter_month)
+            cursor.execute("""
+                SELECT earnings_play_signal,
+                       COUNT(*) as total,
+                       SUM(CASE WHEN ABS(actual_move_1day_pct) >=
+                           COALESCE(straddle_expected_move_pct, expected_move_pct, 999)
+                           THEN 1 ELSE 0 END) as beat
+                FROM earnings_events
+                WHERE earnings_date >= ?
+                AND earnings_play_signal IN ('BUY', 'STRONG BUY', 'WATCH')
+                AND actual_move_1day_pct IS NOT NULL
+                GROUP BY earnings_play_signal
+            """, (quarter_start,))
+            scorecard_rows = [dict(r) for r in cursor.fetchall()]
+
+            conn.close()
+        except Exception as e:
+            logging.debug("Post-earnings enrichment error: {}".format(e))
+            scorecard_rows = []
+
+        # Merge outcome data into row dicts
+        for row in rows:
+            key = (row.get('symbol'), row.get('earnings_date'))
+            if key in outcome_map:
+                outcome = outcome_map[key]
+                row['actual_move_1day_pct'] = outcome.get('actual_move_1day_pct')
+                row['actual_max_move_pct'] = outcome.get('actual_max_move_pct')
+                row['move_vs_expected_pct'] = outcome.get('move_vs_expected_pct')
+                row['iv_collapse_pct'] = outcome.get('iv_collapse_pct')
+
+        # Post-earnings column layout
+        cols = [
+            ("Sym",      6, "<"),
+            ("T+",       3, ">"),
+            ("Signal",  10, "<"),
+            ("StrdMv",   6, ">"),
+            ("Actual",   7, ">"),
+            ("Peak",     6, ">"),
+            ("IVCrsh",   6, ">"),
+            ("Verdict", 10, "<"),
+        ]
+        widths = [w for _, w, _ in cols]
+
+        def hline(left, mid, right):
+            return left + mid.join("\u2550" * (w + 2) for w in widths) + right
+
+        def trow(values):
+            cells = []
+            for val, (_, w, align) in zip(values, cols):
+                if align == "<":
+                    cells.append(" {:<{}} ".format(val, w))
+                else:
+                    cells.append(" {:>{}} ".format(val, w))
+            return "\u2551" + "\u2551".join(cells) + "\u2551"
+
+        print(hline("\u2554", "\u2566", "\u2557"))
+        print(trow([h for h, _, _ in cols]))
+        print(hline("\u2560", "\u256c", "\u2563"))
+
+        for row in rows:
+            # T+ number from status
+            status = row.get('status') or ''
+            t_plus = status.replace('T+', '') if status.startswith('T+') else status
+
+            signal = (row.get('earnings_play_signal') or '-')[:10]
+
+            strd = row.get('straddle_expected_move_pct')
+            strd_str = "{:.1f}%".format(strd) if strd is not None else "-"
+
+            actual = row.get('actual_move_1day_pct')
+            actual_str = "{:+.1f}%".format(actual) if actual is not None else "PEND"
+
+            peak = row.get('actual_max_move_pct')
+            if peak is not None:
+                peak_str = "{:.1f}%".format(abs(peak))
+            else:
+                peak_str = "PEND"
+
+            iv_crush = row.get('iv_collapse_pct')
+            if iv_crush is not None:
+                iv_crush_str = "{:+.0f}%".format(iv_crush)
+            else:
+                iv_crush_str = "PEND"
+
+            # Verdict from move_vs_expected_pct (actual/straddle * 100)
+            mve = row.get('move_vs_expected_pct')
+            if mve is None:
+                verdict = "PENDING"
+            elif mve >= 100:
+                verdict = "BEAT +{:.0f}%".format(mve - 100)
+            elif mve >= 90:
+                verdict = "MET"
+            else:
+                verdict = "MISS -{:.0f}%".format(100 - mve)
+            verdict = verdict[:10]
+
+            print(trow([
+                (row.get('symbol') or '?')[:6],
+                t_plus, signal, strd_str,
+                actual_str, peak_str, iv_crush_str, verdict]))
+
+        print(hline("\u255a", "\u2569", "\u255d"))
+        print("{} post-earnings".format(len(rows)))
+
+        # Season scorecard
+        if scorecard_rows:
+            parts = []
+            for srow in scorecard_rows:
+                sig = srow['earnings_play_signal']
+                total = srow['total']
+                beat = srow['beat']
+                label = sig
+                if sig == 'STRONG BUY':
+                    label = 'STR BUY'
+                pct = beat * 100 // total if total > 0 else 0
+                parts.append("{} {}/{} ({}%)".format(label, beat, total, pct))
+            print("Signal Scorecard: {}".format(" | ".join(parts)))
+
         print("")
 
     # ─── End-of-Day Market Report ──────────────────────────────────────────
