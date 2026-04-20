@@ -107,6 +107,10 @@ def _migrate_earnings_events_outcome_columns(db_path):
         ('move_vs_expected_pct', 'REAL'),
         ('iv_collapse_pct', 'REAL'),
         ('outcome_updated_at', 'TEXT'),
+        ('move_vs_straddle_pct', 'REAL'),
+        ('move_vs_historical_pct', 'REAL'),
+        ('straddle_outcome', 'TEXT'),
+        ('signal_accuracy', 'TEXT'),
     ]
 
     try:
@@ -693,12 +697,17 @@ class PostEarningsCalculator:
         # Build IV map: days_from_earnings -> iv_30dte
         iv_map = {s['days_from_earnings']: s['iv_30dte'] for s in snapshots if s['iv_30dte']}
 
-        # Get IV at key points
+        # Get IV at key points — use fuzzy matching for post-earnings days
+        # because exact day offsets skip weekends (e.g. Friday earnings has no
+        # T+1 snapshot — next trading day is Monday = T+3 calendar days)
+        positive_days = sorted(k for k in iv_map if k > 0)
         iv_at_t_minus_7 = iv_map.get(-7)  # 7 days before earnings
         iv_at_t_minus_1 = iv_map.get(-1)  # 1 day before earnings
         iv_at_t0 = iv_map.get(0)          # Day of earnings
-        iv_at_t1 = iv_map.get(1)          # 1 day after
-        iv_at_t3 = iv_map.get(3)          # 3 days after
+        # First available post-earnings snapshot (T+1 weekday, T+3 Friday)
+        iv_at_t_post = iv_map[positive_days[0]] if positive_days else None
+        # Second available post-earnings snapshot for recovery calc
+        iv_at_t_post2 = iv_map[positive_days[1]] if len(positive_days) >= 2 else None
 
         # Calculate IV metrics
         iv_metrics = {}
@@ -707,13 +716,13 @@ class PostEarningsCalculator:
         if iv_at_t_minus_7 and iv_at_t_minus_1:
             iv_metrics['iv_buildup_pct'] = ((iv_at_t_minus_1 - iv_at_t_minus_7) / iv_at_t_minus_7) * 100
 
-        # IV Collapse: T-1 to T+1 (IV crush right after earnings)
-        if iv_at_t_minus_1 and iv_at_t1:
-            iv_metrics['iv_collapse_pct'] = ((iv_at_t1 - iv_at_t_minus_1) / iv_at_t_minus_1) * 100
+        # IV Collapse: T-1 to first post-earnings day
+        if iv_at_t_minus_1 and iv_at_t_post:
+            iv_metrics['iv_collapse_pct'] = ((iv_at_t_post - iv_at_t_minus_1) / iv_at_t_minus_1) * 100
 
-        # IV Recovery: T+1 to T+3 (IV recovering after crush)
-        if iv_at_t1 and iv_at_t3:
-            iv_metrics['iv_recovery_pct'] = ((iv_at_t3 - iv_at_t1) / iv_at_t1) * 100
+        # IV Recovery: first to second post-earnings day
+        if iv_at_t_post and iv_at_t_post2:
+            iv_metrics['iv_recovery_pct'] = ((iv_at_t_post2 - iv_at_t_post) / iv_at_t_post) * 100
 
         # IV Crush Severity (5-tier scale centered around ~45% typical post-earnings crush)
         if iv_metrics.get('iv_collapse_pct'):
@@ -943,6 +952,9 @@ class PostEarningsCalculator:
         """Write denormalized outcome summary back to earnings_events.
 
         Provides at-a-glance historical view without JOINing earnings_moves.
+        Computes two comparison metrics:
+          - move_vs_straddle_pct: abs(actual) / straddle * 100 (trade outcome)
+          - move_vs_historical_pct: abs(actual) / historical_avg * 100 (signal accuracy)
 
         Args:
             cursor: Database cursor
@@ -950,12 +962,53 @@ class PostEarningsCalculator:
             moves_record: Computed moves record (same dict used for earnings_moves INSERT)
         """
         try:
+            # Get signal inputs from earnings_events for comparison calcs
+            cursor.execute("""
+                SELECT straddle_expected_move_pct, historical_avg_move_pct
+                FROM earnings_events WHERE event_id = ?
+            """, (event_id,))
+            event_row = cursor.fetchone()
+
+            actual_abs = abs(moves_record['move_1day_pct']) if moves_record.get('move_1day_pct') is not None else None
+
+            # Trade outcome: actual vs straddle
+            move_vs_straddle = None
+            straddle_outcome = None
+            straddle_pct = event_row['straddle_expected_move_pct'] if event_row else None
+            if actual_abs is not None and straddle_pct and straddle_pct > 0:
+                move_vs_straddle = (actual_abs / straddle_pct) * 100
+                if move_vs_straddle >= 110:
+                    straddle_outcome = 'PROFIT'
+                elif move_vs_straddle >= 95:
+                    straddle_outcome = 'FLAT'
+                else:
+                    straddle_outcome = 'LOSS'
+
+            # Signal accuracy: actual vs our historical avg prediction
+            move_vs_historical = None
+            signal_accuracy = None
+            hist_pct = event_row['historical_avg_move_pct'] if event_row else None
+            if actual_abs is not None and hist_pct and hist_pct > 0:
+                move_vs_historical = (actual_abs / hist_pct) * 100
+                if move_vs_historical >= 100:
+                    signal_accuracy = 'CONFIRMED'
+                elif move_vs_historical >= 80:
+                    signal_accuracy = 'CLOSE'
+                elif move_vs_historical >= 60:
+                    signal_accuracy = 'OVER'
+                else:
+                    signal_accuracy = 'WAY OFF'
+
             cursor.execute("""
                 UPDATE earnings_events
                 SET actual_move_1day_pct = ?,
                     actual_max_move_pct = ?,
                     move_vs_expected_pct = ?,
                     iv_collapse_pct = ?,
+                    move_vs_straddle_pct = ?,
+                    move_vs_historical_pct = ?,
+                    straddle_outcome = ?,
+                    signal_accuracy = ?,
                     outcome_updated_at = ?
                 WHERE event_id = ?
             """, (
@@ -963,6 +1016,10 @@ class PostEarningsCalculator:
                 moves_record.get('max_intraday_move_pct'),
                 moves_record.get('move_vs_expected_pct'),
                 moves_record.get('iv_collapse_pct'),
+                move_vs_straddle,
+                move_vs_historical,
+                straddle_outcome,
+                signal_accuracy,
                 moves_record.get('calculated_at'),
                 event_id
             ))

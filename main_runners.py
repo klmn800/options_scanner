@@ -1368,7 +1368,10 @@ class OrchestratorRunnersMixin:
                 cursor.execute("""
                     SELECT symbol, earnings_date,
                            actual_move_1day_pct, actual_max_move_pct,
-                           move_vs_expected_pct, iv_collapse_pct
+                           move_vs_expected_pct, iv_collapse_pct,
+                           move_vs_straddle_pct, move_vs_historical_pct,
+                           straddle_outcome, signal_accuracy,
+                           historical_avg_move_pct
                     FROM earnings_events
                     WHERE symbol IN ({})
                     AND earnings_date >= date('now', '-10 days')
@@ -1404,21 +1407,26 @@ class OrchestratorRunnersMixin:
             key = (row.get('symbol'), row.get('earnings_date'))
             if key in outcome_map:
                 outcome = outcome_map[key]
-                row['actual_move_1day_pct'] = outcome.get('actual_move_1day_pct')
-                row['actual_max_move_pct'] = outcome.get('actual_max_move_pct')
-                row['move_vs_expected_pct'] = outcome.get('move_vs_expected_pct')
-                row['iv_collapse_pct'] = outcome.get('iv_collapse_pct')
+                for col in ('actual_move_1day_pct', 'actual_max_move_pct',
+                            'move_vs_expected_pct', 'iv_collapse_pct',
+                            'move_vs_straddle_pct', 'move_vs_historical_pct',
+                            'straddle_outcome', 'signal_accuracy',
+                            'historical_avg_move_pct'):
+                    row[col] = outcome.get(col)
 
         # Post-earnings column layout
+        # identity → signal → expectations → outcome → verdicts
         cols = [
             ("Sym",      6, "<"),
             ("T+",       3, ">"),
             ("Signal",  10, "<"),
+            ("HistMv",   6, ">"),
             ("StrdMv",   6, ">"),
             ("Actual",   7, ">"),
             ("Peak",     6, ">"),
             ("IVCrsh",   6, ">"),
-            ("Verdict", 10, "<"),
+            ("Trade",    6, "<"),
+            ("SigAcc",   7, "<"),
         ]
         widths = [w for _, w, _ in cols]
 
@@ -1445,6 +1453,9 @@ class OrchestratorRunnersMixin:
 
             signal = (row.get('earnings_play_signal') or '-')[:10]
 
+            hist = row.get('historical_avg_move_pct')
+            hist_str = "{:.1f}%".format(hist) if hist is not None else "-"
+
             strd = row.get('straddle_expected_move_pct')
             strd_str = "{:.1f}%".format(strd) if strd is not None else "-"
 
@@ -1463,22 +1474,38 @@ class OrchestratorRunnersMixin:
             else:
                 iv_crush_str = "PEND"
 
-            # Verdict from move_vs_expected_pct (actual/straddle * 100)
-            mve = row.get('move_vs_expected_pct')
-            if mve is None:
-                verdict = "PENDING"
-            elif mve >= 100:
-                verdict = "BEAT +{:.0f}%".format(mve - 100)
-            elif mve >= 90:
-                verdict = "MET"
-            else:
-                verdict = "MISS -{:.0f}%".format(100 - mve)
-            verdict = verdict[:10]
+            # Trade outcome: actual vs straddle (was the trade profitable?)
+            trade_str = row.get('straddle_outcome') or ''
+            if not trade_str and actual is not None and strd and strd > 0:
+                # Compute inline if DB column not yet populated
+                pct = (abs(actual) / strd) * 100
+                if pct >= 110:
+                    trade_str = 'PROFIT'
+                elif pct >= 95:
+                    trade_str = 'FLAT'
+                else:
+                    trade_str = 'LOSS'
+            trade_str = trade_str or 'PEND'
+
+            # Signal accuracy: actual vs our historical prediction
+            sig_acc_str = row.get('signal_accuracy') or ''
+            if not sig_acc_str and actual is not None and hist and hist > 0:
+                pct = (abs(actual) / hist) * 100
+                if pct >= 100:
+                    sig_acc_str = 'CONFIRM'
+                elif pct >= 80:
+                    sig_acc_str = 'CLOSE'
+                elif pct >= 60:
+                    sig_acc_str = 'OVER'
+                else:
+                    sig_acc_str = 'WAY OFF'
+            sig_acc_str = sig_acc_str or 'PEND'
 
             print(trow([
                 (row.get('symbol') or '?')[:6],
-                t_plus, signal, strd_str,
-                actual_str, peak_str, iv_crush_str, verdict]))
+                t_plus, signal, hist_str, strd_str,
+                actual_str, peak_str, iv_crush_str,
+                trade_str, sig_acc_str]))
 
         print(hline("\u255a", "\u2569", "\u255d"))
         print("{} post-earnings".format(len(rows)))

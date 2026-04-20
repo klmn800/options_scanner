@@ -150,7 +150,7 @@ def format_database_values(data_dict, column_types=None):
         # v_option_comparison view fields (flags/counts)
         'in_gamma_zone',
         # Earnings Intelligence System fields (text/timestamp fields)
-        'move_direction', 'iv_crush_severity', 'arbitrage_quality', 'snapshot_type',
+        'move_direction', 'iv_crush_severity', 'arbitrage_quality', 'snapshot_type', 'straddle_outcome', 'signal_accuracy',
         'snapshot_date', 'is_primary_symbol', 'earnings_time', 'source', 'is_backfilled', 'note_type', 'sentiment', 'tags',
         'notes', 'peer_type', 'calculated_at',
         # Roll detection fields
