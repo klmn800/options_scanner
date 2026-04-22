@@ -75,11 +75,15 @@ SYNC_TABLE_CONFIG = {
 
     # Daily summary tables
     'market_daily_summary': ('trade_date', 'REPLACE'),
+
+    # Trade tracking
+    'trade_executions': ('created_at', 'REPLACE'),
 }
 
 # Default tables for --quick-sync without --table argument
 # market_daily_summary included so intraday regime updates reach the query DB each cycle
-DEFAULT_QUICK_SYNC_TABLES = ['flow_alerts', 'flow_options_scans', 'flow_watchlist_daily', 'market_daily_summary']
+# trade_executions included so new fills are visible in query DB promptly
+DEFAULT_QUICK_SYNC_TABLES = ['flow_alerts', 'flow_options_scans', 'flow_watchlist_daily', 'market_daily_summary', 'trade_executions']
 
 def get_timestamp():
     """Get formatted timestamp for logging"""

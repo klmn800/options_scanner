@@ -511,16 +511,16 @@ def run_historical_backfill(health_reporter=None):
 def run_quick_sync():
     """Execute quick database sync to keep query DB current during market hours
 
-    Syncs flow_alerts, flow_options_scans, flow_watchlist_daily, and
-    market_daily_summary from datalake.db to datalake_query.db using
-    watermark approach. Non-blocking if fails.
+    Syncs default quick-sync tables (flow_alerts, flow_options_scans,
+    flow_watchlist_daily, market_daily_summary, trade_executions) from
+    datalake.db to datalake_query.db using watermark approach. Non-blocking if fails.
 
     Returns:
         tuple: (success: bool, sync_time: float, row_count: int)
     """
     try:
         start_time = time.time()
-        logging.info("Syncing flow_alerts, flow_options_scans, flow_watchlist_daily, market_daily_summary to query database")
+        logging.info("Quick-syncing default tables to query database")
 
         # Execute quick-sync subprocess
         env = os.environ.copy()
