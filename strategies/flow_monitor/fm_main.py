@@ -1682,8 +1682,13 @@ def run_market_hours():
                 watchlist_elapsed = time.time() - watchlist_start
 
                 # Earnings signal tracking (intraday signal change detection)
+                # Trade ingest runs on the same cadence (every N cycles)
                 earnings_signal_elapsed = 0
-                if earnings_tracker and scan_timestamp and cycle >= 2 and (cycle - 2) % earnings_tracker.check_interval == 0:
+                trade_ingest_elapsed = 0
+                periodic_check_interval = earnings_tracker.check_interval if earnings_tracker else 4
+                run_periodic = scan_timestamp and cycle >= 2 and (cycle - 2) % periodic_check_interval == 0
+
+                if run_periodic and earnings_tracker:
                     print("")
                     beautiful_log("Checking Earnings Signals (every {} cycles)".format(
                         earnings_tracker.check_interval), 'info')
@@ -1700,6 +1705,21 @@ def run_market_hours():
                     except Exception as e:
                         logging.warning("Earnings signal tracking error (non-critical): {}".format(e))
                     earnings_signal_elapsed = time.time() - est_start
+
+                if run_periodic:
+                    ti_start = time.time()
+                    try:
+                        from tools.trade_ingest import ingest_from_email
+                        ti_stats = ingest_from_email()
+                        if ti_stats.get('inserted', 0) > 0:
+                            beautiful_log("Trade ingest: {} new fill(s)".format(
+                                ti_stats['inserted']), 'success')
+                        elif ti_stats.get('processed', 0) > 0:
+                            beautiful_log("Trade ingest: {} processed, all duplicates".format(
+                                ti_stats['processed']), 'info')
+                    except Exception as e:
+                        logging.warning("Trade ingest error (non-critical): {}".format(e))
+                    trade_ingest_elapsed = time.time() - ti_start
 
                 # Quick-sync phase
                 print("")
@@ -1820,6 +1840,8 @@ def run_market_hours():
             logging.info("   🎯 Watchlist: {:.1f}s".format(watchlist_elapsed))
         if earnings_signal_elapsed > 0:
             logging.info("   📈 Earnings Signals: {:.1f}s".format(earnings_signal_elapsed))
+        if trade_ingest_elapsed > 0:
+            logging.info("   📥 Trade Ingest: {:.1f}s".format(trade_ingest_elapsed))
         if sync_elapsed > 0:
             logging.info("   🔄 DB Sync: {:.1f}s ({:,} rows)".format(sync_elapsed, sync_rows))
         logging.info("   ⏱️ Total: {:.1f}s".format(elapsed))
