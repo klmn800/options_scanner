@@ -407,7 +407,7 @@ class OrchestratorRunnersMixin:
             "📈 FLOW MONITOR PIPELINE",
             [
                 "Mission: Complete daily options flow monitoring cycle",
-                "Pre-Market: System preparation and setup (9:15 AM)",
+                "Pre-Market: System preparation and setup",
                 "Market Hours: Real-time flow monitoring (9:30 AM - 4:00 PM)",
                 "Post-Market (4:30 PM):",
                 "  1. Historical backfill    3. Symbol rollup",
@@ -424,11 +424,10 @@ class OrchestratorRunnersMixin:
             current_minute = now.minute
 
             # Determine market phase based on current time
-            is_before_pre_market = current_hour < 9 or (current_hour == 9 and current_minute < 15)
-            is_during_pre_market = (current_hour == 9 and current_minute >= 15 and current_minute < 30)
             is_during_market_hours = ((current_hour == 9 and current_minute >= 30) or
                                      (current_hour >= 10 and current_hour < 16))
             is_after_market = current_hour >= 16
+            ta_status = "Skipped"
 
             # Skip pre-market if we're already past it or during market hours
             if is_during_market_hours:
@@ -441,14 +440,8 @@ class OrchestratorRunnersMixin:
                 pre_market_result = {'success': True, 'skipped': True, 'alerts_resolved': 0, 'symbols_updated': 0}
                 # Skip directly to post-market phase
             else:
-                # Pre-market: Wait until exactly 9:15 AM (system preparation)
-                if is_before_pre_market:
-                    target = now.replace(hour=9, minute=15, second=0, microsecond=0)
-                    wait_seconds = (target - now).total_seconds()
-                    if wait_seconds > 0:
-                        self.beautiful_log("Waiting until 9:15 AM for pre-market preparation ({:.1f} minutes)".format(wait_seconds / 60), 'info')
-                        time.sleep(wait_seconds)
-
+                # Pre-market prep runs immediately after Phase 1 (no time gate)
+                # Market hours monitoring has its own 9:30 AM wait downstream
                 self.create_status_box(
                     "🔍 PRE-MARKET PREPARATION",
                     [
@@ -482,6 +475,11 @@ class OrchestratorRunnersMixin:
                     duration = pre_market_result.get('duration_seconds', 0)
                     pm_lines.append("Duration: {:.1f}s".format(duration))
                     self.create_status_box("✅ PRE-MARKET PREPARATION COMPLETE", pm_lines)
+
+                # Step 2.2: Trading Advisor Agent (fire-and-forget)
+                self.beautiful_log("Step 2.2: Trading Advisor Agent (pilot)", 'phase')
+                self.beautiful_log("Loading Trading Advisor morning brief in new window...", 'info')
+                ta_status = self._launch_trading_advisor()
 
             pre_market_success = pre_market_result.get('success', False) if isinstance(pre_market_result, dict) else bool(pre_market_result)
 
@@ -636,6 +634,8 @@ class OrchestratorRunnersMixin:
                     "✅" if pre_market_success else "⚠️",
                     "Skipped" if (isinstance(pre_market_result, dict) and pre_market_result.get('skipped')) else "Completed"),
             ] + pre_market_lines + [
+                "Trading Advisor: {}".format(ta_status),
+            ] + [
                 "Market Hours: {} {}".format(
                     "✅" if market_hours_success else "⚠️",
                     "Completed" if market_hours_success else "Failed"),
@@ -996,6 +996,33 @@ class OrchestratorRunnersMixin:
             self.beautiful_log("Failed to launch TUI: {}".format(e), 'warning')
             return "Launch failed ({})".format(str(e)[:40])
 
+    def _launch_trading_advisor(self):
+        """Launch Trading Advisor agent in a new console window (fire-and-forget).
+
+        Spawns a Claude Code session with the morning brief prompt.
+        The advisor queries the database, builds a morning brief, and
+        stays available for interactive discussion throughout the day.
+
+        Returns status string for the completion log.
+        """
+        try:
+            bat_file = os.path.join(project_root, 'agents', 'trading_advisor', 'trade_morning.bat')
+            if not os.path.exists(bat_file):
+                self.beautiful_log("Trading Advisor batch file not found", 'warning')
+                return "Launch failed (batch file missing)"
+
+            subprocess.Popen(
+                'start "Trading Advisor" cmd /k "{}"'.format(bat_file),
+                shell=True,
+                cwd=project_root,
+            )
+            self.beautiful_log("Trading Advisor launched in new window", 'success')
+            return "Launched in new window"
+
+        except Exception as e:
+            self.beautiful_log("Failed to launch Trading Advisor: {}".format(e), 'warning')
+            return "Launch failed ({})".format(str(e)[:40])
+
     def run_metadata_collection(self):
         """
         Refresh metadata for all tracked symbols using Tradier Fundamentals + Quotes.
@@ -1090,6 +1117,65 @@ class OrchestratorRunnersMixin:
                 "System: Continuing with next operations"
             ], success=False)
             return {'success': False, 'duration_seconds': time.time() - meta_start, 'error': str(e)}
+
+    def run_trade_ingest(self):
+        """Run Trade Ingest Pipeline — parse Robinhood execution emails from Gmail.
+
+        Fast step (~10-30s): searches Gmail for unread execution confirmations,
+        parses trade details, inserts into trade_executions table.
+
+        Reads: Gmail API (Robinhood forwarded emails)
+        Writes: data/datalake.db (trade_executions)
+        """
+        self.create_status_box(
+            "📋 TRADE INGEST",
+            [
+                "Mission: Parse Robinhood execution emails from Gmail",
+                "Source: klmn800alerts@gmail.com (auto-forwarded)",
+                "Output: trade_executions table (dedup by email_message_id)"
+            ]
+        )
+
+        ingest_start = time.time()
+        try:
+            script_path = os.path.join(project_root, 'tools', 'trade_ingest.py')
+            result = self._run_streaming_subprocess(
+                [sys.executable, script_path],
+                timeout=120  # 2 minutes max (expected ~10-30s)
+            )
+            ingest_duration = time.time() - ingest_start
+
+            if result.returncode == 0:
+                print("")
+                self.create_status_box("✅ TRADE INGEST COMPLETE", [
+                    "Duration: {:.0f}s".format(ingest_duration),
+                ])
+                return {'success': True, 'duration_seconds': ingest_duration, 'stdout': result.stdout or ''}
+            else:
+                print("")
+                self.beautiful_log("Trade ingest returned failure status", 'error')
+                self.create_status_box("❌ TRADE INGEST FAILED", [
+                    "Trade ingest returned non-zero exit code",
+                    "Impact: Recent trades may not be recorded",
+                    "System: Continuing with next operations"
+                ], success=False)
+                return {'success': False, 'duration_seconds': ingest_duration, 'stdout': result.stdout or ''}
+
+        except subprocess.TimeoutExpired:
+            self.beautiful_log("Trade ingest timed out after 2 minutes", 'error')
+            self.create_status_box("⏱️ TRADE INGEST TIMEOUT", [
+                "Trade ingest exceeded 2-minute timeout",
+                "System: Continuing with next operations"
+            ], success=False)
+            return {'success': False, 'duration_seconds': time.time() - ingest_start, 'error': 'timeout'}
+
+        except Exception as e:
+            self.beautiful_log("Trade ingest error: {}".format(e), 'error')
+            self.create_status_box("💥 TRADE INGEST ERROR", [
+                "Error: {}".format(str(e)[:60]),
+                "System: Continuing with next operations"
+            ], success=False)
+            return {'success': False, 'duration_seconds': time.time() - ingest_start, 'error': str(e)}
 
     def run_earnings_intelligence(self):
         """Run unified Earnings Intelligence pipeline (PRD 0008)

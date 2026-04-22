@@ -47,11 +47,9 @@ autofix/errors/
 .claude/
 plans/
 
-# Strategic Advisor — development tool, not part of the product
-strategic_advisor/
-
-# AI Council — experimental system
-ai_council/
+# Autonomous Claude Code agents (workspaces with their own .git repos)
+agents/system_analyst/
+agents/trading_advisor/
 
 # Generated task lists
 tasks/

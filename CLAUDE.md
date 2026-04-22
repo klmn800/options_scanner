@@ -68,6 +68,7 @@ python main.py --option-evening    # Evening Option Pipeline (5:00 PM+)
 python main.py --morning-views     # Start from morning views generation
 python main.py --earnings-intel    # Start from Earnings Intelligence pipeline
 python main.py --airline-play      # Start from Airline Play tracking
+python main.py --trade-ingest      # Run trade ingest only (parse Robinhood emails)
 python main.py --database-backup   # Start from database backup phase
 python main.py --sector-archive    # Start from sector-based archive
 
@@ -108,6 +109,17 @@ python tools/news_sentiment.py --symbol NVDA           # Ad-hoc single symbol
 python tools/news_sentiment.py --symbols NVDA,GOOG     # Multiple symbols
 python tools/news_sentiment.py --topic technology       # Topic research
 python tools/news_sentiment.py --budget                 # Check API calls remaining
+```
+
+### Trade Ingest
+```bash
+python tools/trade_ingest.py                      # Ingest Robinhood execution emails
+python tools/trade_ingest.py --dry-run             # Parse without writing to DB
+python tools/trade_ingest.py --recent              # Show recent executions
+python tools/trade_ingest.py --recent --symbol ERIC # Filter by symbol
+python tools/trade_ingest.py --manual --symbol ERIC --action buy \
+    --type option --option-type call --strike 12 --expiry 2026-05-15 \
+    --qty 1 --price 0.55                           # Manual entry
 ```
 
 ### Symbol Lifecycle Management
@@ -157,32 +169,50 @@ python tools/email_digester.py --dry-run            # Preview without processing
 python tools/email_digester.py --headless           # No visible window
 ```
 
-### Strategic Advisor
+### System Analyst Agent
 
-An autonomous Claude Opus session that analyzes the system and produces strategic recommendations. Runs daily at 9 PM via Task Scheduler. Read-only — never modifies code or databases outside its own workspace.
+An autonomous Claude Code session that audits data quality, investigates pipeline behavior, and proposes system improvements. Runs daily at 9 PM via Task Scheduler. Read-only — never modifies code or databases outside its own workspace. Formerly "Strategic Advisor" (renamed 2026-04-22).
 
 ```bash
 # Launch interactive session (Ben watches in real-time)
 cd /d E:\options_scanner
-claude --permission-mode bypassPermissions @strategic_advisor\PROMPT.md
+claude --permission-mode bypassPermissions @agents/system_analyst/PROMPT.md
 
 # Or via launcher (handles date injection)
-python strategic_advisor/launcher.py
+python agents/system_analyst/launcher.py
 ```
 
 **Key files:**
-- `strategic_advisor/PROMPT.md` — the agent's prompt
-- `strategic_advisor/reviews/` — proposals (numbered: 001, 002, etc.)
-- `strategic_advisor/reviews/feedback/` — Ben's feedback on proposals
-- `strategic_advisor/memory/` — agent's persistent workspace (journal, agenda, observations)
+- `agents/system_analyst/PROMPT.md` — the agent's prompt
+- `agents/system_analyst/proposals/` — proposals (numbered: 001, 002, etc.)
+- `agents/system_analyst/proposals/feedback/` — Ben's feedback on proposals
+- `agents/system_analyst/memory/` — agent's persistent workspace (journal, agenda, observations)
 
-**Proposal review workflow:** When Ben says "let's review the strategic advisor's proposals" or similar:
-1. Read `strategic_advisor/reviews/INDEX.md` — shows all proposals and their status (PENDING = unreviewed)
+**Proposal review workflow:** When Ben says "let's review the system analyst's proposals" or similar:
+1. Read `agents/system_analyst/proposals/INDEX.md` — shows all proposals and their status (PENDING = unreviewed)
 2. Read each PENDING proposal
 3. Discuss with Ben — get his take on each one
-4. Write feedback to `strategic_advisor/reviews/feedback/{proposal_name}.md` with verdict and Ben's reasoning
+4. Write feedback to `agents/system_analyst/proposals/feedback/{proposal_name}.md` with verdict and Ben's reasoning
 5. Update `INDEX.md` with the new status (APPROVED, DECLINED, DEFERRED, IMPLEMENTED)
 6. The agent reads feedback at the start of its next session and adjusts its work accordingly
+
+### Trading Advisor Agent
+
+An interactive Claude Code session that interprets options flow, earnings setups, and market data. Launched by the orchestrator at Step 2.2 (pre-market) in a new window. Produces a morning brief, then stays available for interactive discussion throughout the day. Read-only to databases and code.
+
+```bash
+# Launch interactive session (manual)
+agents\trading_advisor\trade.bat
+
+# Morning brief mode (called by orchestrator Step 2.2)
+agents\trading_advisor\trade_morning.bat
+```
+
+**Key files:**
+- `agents/trading_advisor/CLAUDE.md` — role definition and database access patterns
+- `agents/trading_advisor/reference/` — self-curated knowledge library (mechanics, case studies, patterns)
+- `agents/trading_advisor/memory/` — persistent state (trade calls, session notes, research backlog)
+- `agents/trading_advisor/analysis/daily_briefs/` — archived morning briefs
 
 ### Database Archiving and Optimization
 ```bash
@@ -241,7 +271,7 @@ This is a comprehensive **options trading scanner** system with multiple strateg
 5. **Oracle Intelligence** (`oracle/`): AI-powered market analysis
 
 ### Agent System (`agents/`)
-AI agent framework for autonomous contract analysis. The Flow Tracker Agent monitors high-significance contracts through their lifecycle, classifying outcomes (e.g., momentum continuation, mean reversion, earnings play). Stores narratives and classifications in `flow_contract_trackers`, `flow_tracker_updates`, and `agent_actions` tables. See `agents/README.md` for full documentation.
+Autonomous Claude Code CLI agents that observe, analyze, and advise. Each agent has its own workspace, `.git/` repo, write guard hook, and inter-agent mailboxes. See `agents/AGENT_PATTERN.md` for the replicable pattern. Active agents: **System Analyst** (nightly data quality audits, proposals), **Trading Advisor** (morning briefs, interactive market discussion). `agents/Deprecated/` contains the earlier SDK-based Flow Tracker Agent (unused).
 
 **Strategy Strike Range Alignment**: Both Flow Monitor and Option Pipeline use identical ±20% strike ranges for consistency.
 
@@ -439,9 +469,9 @@ The autofix system (`tools/autofix.py`) provides automatic error recovery. When 
 ## Coordination and Scheduling
 
 ### Daily Schedule
-- **Phase 1** (6:35 AM): Pre-market — Morning Option Pipeline, Earnings Intelligence, Metadata, Sync, Morning Views
+- **Phase 1** (6:35 AM): Pre-market — Morning Option Pipeline, Earnings Intelligence, Metadata, Trade Ingest, Sync, Morning Views
 - **Phase 2** (9:15 AM): Flow Monitor — pre-market tasks, market hours monitoring (~15-20 cycles), post-market analysis
-- **Phase 3** (5:00 PM): Evening — Option Pipeline, Airline Play, Final Sync
+- **Phase 3** (5:00 PM): Evening — Trade Ingest, Option Pipeline, Airline Play, Final Sync
 - **Phase 4**: Evening ops — Daily Backup, Autofix Review
 - **Phase 5** (Fridays): Weekly Backup, FM Baseline Update, Earnings Refresh, Sector Archive
 - **Phase 6**: System Maintenance — 6.1 Performance Data Collection (writes `data/performance.db`), 6.2 Symbol Health Check (detects missing symbols, logs suspects)
@@ -507,6 +537,7 @@ System maintains **two backup files** and **sector-based archives** for redundan
 - `tools/symbol_lifecycle.py`: CLI for symbol onboarding, offboarding, universe management. See `tools/lifecycle/README.md`.
 - `tools/lifecycle/`: Package with onboarding, offboarding, routing, preflight checks, health check (Phase 6.2), audit trail, UI helpers.
 - `tools/email_reader.py`: Gmail API inbox reader for klmn800alerts@gmail.com (OAuth2, full access)
+- `tools/trade_ingest.py`: Trade execution parser — ingests Robinhood confirmation emails from Gmail into `trade_executions` table. Runs as orchestrator Steps 1.4 + 3.1. Design doc: `docs/trade_ingest/BRAINSTORM.md`.
 - `tools/email_digester.py`: Spawns Claude Code (Haiku) to extract knowledge from emails into `memory/knowledge/`
 - `strategies/flow_monitor/fm_config.py` & `strategies/option_pipeline/op_config.py`: Strategy configurations
 - `strategies/flow_monitor/fm_earnings_signals.py`: Intraday earnings signal tracker — recomputes straddle underpricing from live scan data every N cycles (~hourly), logs signal upgrades/downgrades vs morning baseline. Console only, config toggle.
@@ -544,6 +575,7 @@ System maintains **two backup files** and **sector-based archives** for redundan
 - **earnings_moves**: Price moves, IV changes (buildup/collapse/crush), expected move, and move-vs-expected post-earnings (9K+ rows) — not in archive tiers. Primary source: `earnings_snapshots` for price moves, `option_symbol_summary` for IV metrics (fallback to `historical_prices` if snapshots missing).
 - **earnings_sector_effects**: Sector sympathy and arbitrage opportunities — currently empty, not in archive tiers
 - **industry_peer_mappings**: Industry-based peer relationships (742 symbols, reference data)
+- **trade_executions**: Robinhood trade fills parsed from Gmail. One row per fill (immutable log). Dedup by `email_message_id`. `fill_price` is per-share (options: email_price/100). `position_key` = `SYMBOL|type|option_type|strike|expiry` for composite joins. Editable columns: `notes`, `trade_call_ref`, `review_status`.
 
 **Performance Database (`data/performance.db`)** — operational metrics, not trading data:
 - 16 tables tracking execution durations, sub-task breakdowns, item counts for every orchestrator step

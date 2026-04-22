@@ -2,39 +2,16 @@
 """
 Agents Package (agents/__init__.py)
 ------------------------------------
-Flow Tracker Agent - AI analyst that builds narratives for option flow alerts.
+Autonomous Claude Code CLI agents that observe, analyze, and advise.
 
-Main components:
-- AgentRuntime: Core orchestrator with Anthropic SDK
-- AgentTools: Tool implementations (query, create, update, close)
-- AgentConfig: Configuration management
-- AgentLogger: Session logging
+Active agents:
+- system_analyst/ — nightly data quality audits and improvement proposals
+- trading_advisor/ — morning briefs and interactive market discussion
 
-Author: Ben (with assistance from Claude)
-Date: 2026-01-01
+See AGENT_PATTERN.md for the replicable pattern used to build new agents.
+
+Deprecated/:
+- Flow Tracker Agent (SDK-based, Jan 2026) — superseded by CLI agents
 """
 
-from agents.agent_runtime import AgentRuntime
-from agents.agent_tools import AgentTools
-from agents.agent_config import AgentConfig, get_config
-from agents.agent_logger import AgentLogger
-from agents.agent_prompts import (
-    FM_AGENT_SYSTEM_PROMPT,
-    FLOW_CLASSIFICATIONS,
-    PROCESS_NEW_ALERT_PROMPT,
-    UPDATE_TRACKER_PROMPT
-)
-
-__all__ = [
-    'AgentRuntime',
-    'AgentTools',
-    'AgentConfig',
-    'get_config',
-    'AgentLogger',
-    'FM_AGENT_SYSTEM_PROMPT',
-    'FLOW_CLASSIFICATIONS',
-    'PROCESS_NEW_ALERT_PROMPT',
-    'UPDATE_TRACKER_PROMPT'
-]
-
-__version__ = '1.0.0'
+__version__ = '2.0.0'

@@ -19,10 +19,8 @@
 | earnings_snapshots | 0 | ✅ Active |
 | earnings_upcoming | 368 | ✅ Active |
 | flow_alerts | 1,757 | ✅ Active |
-| flow_contract_trackers | 49 | ✅ Active |
 | flow_options_scans | 23,470,033 | ✅ Active |
 | flow_symbol_summary | 2,210 | ✅ Active |
-| flow_tracker_updates | 4 | ✅ Active |
 | flow_watchlist_daily | 21 | ✅ Active |
 | flow_watchlist_daily_archive | 0 | ✅ Active |
 | historical_prices | 48,713 | ✅ Active |
@@ -35,18 +33,9 @@
 | symbol_baselines | 754 | ✅ Active |
 | symbol_metadata | 757 | ✅ Active |
 
-**Note:** Tables excluded from this documentation: agent_actions, user_watchlist, symbol_ai_council, social_posts
+**Note:** Tables excluded from this documentation: user_watchlist, symbol_ai_council, social_posts. Tables `flow_contract_trackers`, `flow_tracker_updates`, and `agent_actions` were dropped 2026-04-22 (deprecated Flow Tracker Agent system).
 
 ## Migration Notes (October 2025 - January 2026)
-
-**Flow Tracker Agent System (January 2026):**
-- Added `flow_contract_trackers` table - contract lifecycle tracking with AI-generated narratives
-- Added `flow_tracker_updates` table - time series of tracker events and narrative updates
-- Built on 2026-01-01 as experimental Claude API-powered agent framework
-- Status: Part 2 Complete (core framework), awaiting Part 3 (FM integration into production pipeline)
-- Agent generates natural language narratives explaining option flow patterns
-- Classification system: institutional_accumulation, earnings_play, hedge, technical_breakout, sector_rotation, unclear
-- See: agents/README.md for full documentation
 
 **Alert Resolution Integration (Jan 7, 2026):**
 - Added alert resolution tracking to `flow_alerts` (5 new columns)
@@ -239,102 +228,6 @@
 2. fm_alerts.py creates alert record with initial metrics
 3. fm_evaluator.py updates profit/loss metrics as contract evolves
 4. fm_evaluator.py sets final_quality_score when evaluation complete
-
-### flow_contract_trackers
-**Rows:** 49
-**Purpose:** Contract lifecycle tracking with AI-generated narratives
-**Populated By:** Flow Tracker Agent (agents/agent_runtime.py)
-**Status:** Experimental - core framework complete, not yet integrated into FM production pipeline
-**Integration:** Links to flow_alerts and flow_tracker_updates
-
-| Column | Type | Description |
-|--------|------|-------------|
-| tracker_id | INTEGER | Unique tracker identifier (Primary Key, Auto-increment) |
-| contract_hash | TEXT | Contract identifier: SYMBOL\|STRIKE\|EXPIRATION\|TYPE |
-| symbol | TEXT | Ticker symbol |
-| strike | REAL | Strike price |
-| expiration | TEXT | Option expiration date |
-| option_type | TEXT | CALL or PUT |
-| created_at | TEXT | Tracker creation timestamp |
-| updated_at | TEXT | Last update timestamp |
-| status | TEXT | Current tracker status (active/closed/expired) |
-| close_reason | TEXT | Reason for closing tracker |
-| days_active | INTEGER | Days tracker has been active |
-| narrative | TEXT | Oracle AI-generated contract narrative |
-| flow_classification | TEXT | Flow pattern classification |
-| initial_alert_score | REAL | Significance score at tracker creation |
-| alert_count | INTEGER | Number of alerts for this contract |
-| last_alert_id | INTEGER | Foreign key to most recent alert |
-| sector | TEXT | Company sector |
-| avg_daily_volume | INTEGER | Average daily volume |
-| earnings_date | TEXT | Next earnings date (if applicable) |
-| days_to_earnings | INTEGER | Days until earnings |
-| user_notes | TEXT | Manual notes/annotations |
-
-**Primary Key:** tracker_id
-
-**Indexes:**
-- `idx_trackers_expiration` ON (expiration)
-- `idx_trackers_symbol` ON (symbol)
-- `idx_trackers_status` ON (status)
-
-**Key Features:**
-1. **AI Narrative Generation:** Claude API automatically generates natural language narratives explaining flow patterns
-2. **Alert Linkage:** Connects to flow_alerts for multi-alert contracts
-3. **Lifecycle Management:** Tracks status changes from creation to closure (active/closed/expired)
-4. **Contextual Data:** Sector, earnings, volume context for narrative generation
-5. **User Annotations:** Supports manual notes alongside AI narratives
-6. **Flow Classification:** 6 categories - institutional_accumulation, earnings_play, hedge, technical_breakout, sector_rotation, unclear
-
-**Usage:**
-- Identifies "hot" contracts receiving repeated alerts
-- Generates intelligent narratives explaining contract activity patterns
-- Supports contract watchlist and portfolio tracking
-- Cost: ~$0.005-$0.01 per alert (~$3.38/month estimated for 15 alerts/day)
-
-**Development Status:**
-- Core framework built and tested (2026-01-01)
-- Not yet integrated into production Flow Monitor pipeline
-- Low row count reflects testing phase, not production deployment
-
-### flow_tracker_updates
-**Rows:** 4
-**Purpose:** Time series of tracker events and narrative updates (audit trail)
-**Populated By:** Flow Tracker Agent (agents/agent_runtime.py)
-**Status:** Experimental - testing phase, not production-deployed
-**Parent Table:** flow_contract_trackers
-
-| Column | Type | Description |
-|--------|------|-------------|
-| update_id | INTEGER | Unique update identifier (Primary Key, Auto-increment) |
-| tracker_id | INTEGER | Foreign key to flow_contract_trackers |
-| update_timestamp | TEXT | When update occurred |
-| trigger_type | TEXT | What triggered update (new_alert/price_move/time_based) |
-| alert_id | INTEGER | Foreign key to triggering alert (if applicable) |
-| update_narrative | TEXT | Oracle AI narrative for this update |
-| queries_executed | TEXT | SQL queries Oracle ran for context |
-| data_points | TEXT | Key data points found |
-| previous_status | TEXT | Tracker status before update |
-| new_status | TEXT | Tracker status after update |
-
-**Primary Key:** update_id
-
-**Indexes:**
-- `idx_updates_timestamp` ON (update_timestamp)
-- `idx_updates_tracker` ON (tracker_id)
-
-**Key Features:**
-1. **Event History:** Complete audit trail of tracker changes
-2. **Narrative Evolution:** Shows how AI understanding evolves over time
-3. **Trigger Attribution:** Links updates to specific events (alerts, price moves, time-based)
-4. **Query Transparency:** Records SQL queries agent executed for each update
-5. **Status Transitions:** Tracks tracker lifecycle state changes
-
-**Usage:**
-- Review how AI understanding evolved over contract lifecycle
-- Debug agent decision-making process
-- Audit trail for tracker status changes
-- Low row count reflects testing phase (4 updates from experimental runs)
 
 ### flow_symbol_summary
 **Rows:** 2,210
