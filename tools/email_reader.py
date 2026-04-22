@@ -51,6 +51,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+# Suppress "file_cache is only supported with oauth2client<4.0.0" noise
+logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
+
 logger = logging.getLogger(__name__)
 
 # Full access scope (read, label, trash, etc. - but we only build read operations)
@@ -105,12 +108,12 @@ class GmailReader:
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                print(f"Refreshing expired token for {self.account}...")
+                logging.debug("Refreshing expired token for {}...".format(self.account))
                 try:
                     creds.refresh(Request())
                 except Exception as e:
-                    print(f"Token refresh failed: {e}")
-                    print("Re-running full auth flow...")
+                    logging.warning("Token refresh failed: {}".format(e))
+                    logging.debug("Re-running full auth flow...")
                     creds = None
 
             if not creds:
@@ -127,7 +130,7 @@ class GmailReader:
             # Save token
             with open(self.token_file, 'w', encoding='utf-8') as f:
                 f.write(creds.to_json())
-            print(f"Token saved to {self.token_file}")
+            logging.debug("Token saved to {}".format(self.token_file))
 
         self._service = build('gmail', 'v1', credentials=creds)
         return True

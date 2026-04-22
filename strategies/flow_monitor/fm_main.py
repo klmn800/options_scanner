@@ -1707,16 +1707,17 @@ def run_market_hours():
                     earnings_signal_elapsed = time.time() - est_start
 
                 if run_periodic:
+                    print("")
+                    beautiful_log("Checking Trade Ingest", 'info')
                     ti_start = time.time()
                     try:
                         from tools.trade_ingest import ingest_from_email
-                        ti_stats = ingest_from_email()
+                        ti_stats = ingest_from_email(quiet=True)
                         if ti_stats.get('inserted', 0) > 0:
                             beautiful_log("Trade ingest: {} new fill(s)".format(
                                 ti_stats['inserted']), 'success')
-                        elif ti_stats.get('processed', 0) > 0:
-                            beautiful_log("Trade ingest: {} processed, all duplicates".format(
-                                ti_stats['processed']), 'info')
+                        else:
+                            beautiful_log("Trade ingest: no new fills", 'info')
                     except Exception as e:
                         logging.warning("Trade ingest error (non-critical): {}".format(e))
                     trade_ingest_elapsed = time.time() - ti_start
