@@ -175,6 +175,12 @@ def cmd_update(args):
 
     print_row(before, label='BEFORE')
 
+    # Warn when overwriting non-null fields
+    for col, new_val in changes.items():
+        old_val = before.get(col)
+        if old_val is not None and old_val != '' and old_val != new_val:
+            print(f'  ** overwriting {col}: {repr(old_val)} -> {repr(new_val)}')
+
     set_clause = ', '.join(f'{col} = ?' for col in changes)
     values = list(changes.values()) + [args.update]
     conn.execute(f'UPDATE trade_executions SET {set_clause} WHERE id = ?', values)
