@@ -78,7 +78,8 @@ SYNC_TABLE_CONFIG = {
 }
 
 # Default tables for --quick-sync without --table argument
-DEFAULT_QUICK_SYNC_TABLES = ['flow_alerts', 'flow_options_scans', 'flow_watchlist_daily']
+# market_daily_summary included so intraday regime updates reach the query DB each cycle
+DEFAULT_QUICK_SYNC_TABLES = ['flow_alerts', 'flow_options_scans', 'flow_watchlist_daily', 'market_daily_summary']
 
 def get_timestamp():
     """Get formatted timestamp for logging"""

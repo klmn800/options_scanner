@@ -53,11 +53,15 @@ shutdown_event = threading.Event()
 
 
 def display_market_snapshot(collector):
-    """Display live market conditions (SPY/QQQ/VIX) at end of FM cycle.
+    """Display live market conditions (SPY/QQQ/VIX) and persist to market_daily_summary.
 
-    Console-only (print, not logging) — this is visual context, not operational data.
     Uses collector's Tradier client for a single 3-symbol quote call.
     SPY/QQQ/VIX are not in FM universe, so cache always misses = fresh data.
+
+    Also writes/updates today's market_daily_summary row with core fields
+    (SPY/QQQ/VIX prices, change %, regime, direction). The post-market
+    collect_market_data() overwrites this with the full-fat version (breadth,
+    sector ETFs, highs/lows). Quick sync copies the row to the query DB each cycle.
     """
     try:
         quotes = collector.tradier_client.get_quotes(['SPY', 'QQQ', 'VIX'], max_age_seconds=60)
@@ -78,8 +82,130 @@ def display_market_snapshot(collector):
 
         if parts:
             print('   📊 ' + '  |  '.join(parts))
+
+        # Persist to market_daily_summary so query DB gets fresh regime data
+        _persist_market_snapshot(quotes)
     except Exception as e:
         logging.debug("Market snapshot failed: {}".format(e))
+
+
+def _persist_market_snapshot(quotes):
+    """Write/update today's market_daily_summary row with core market fields.
+
+    Uses INSERT OR REPLACE on trade_date (PK). Only populates SPY/QQQ/VIX
+    columns + regime + direction. The post-market collect_market_data() run
+    overwrites with the complete row (breadth, sector ETFs, etc.).
+
+    Writes to production datalake.db. Quick sync carries it to query DB.
+    """
+    import sqlite3
+    from tools.decimal_formatter import clean_database_row
+
+    try:
+        spy = quotes.get('SPY', {})
+        qqq = quotes.get('QQQ', {})
+        vix = quotes.get('VIX', {})
+
+        spy_last = spy.get('last', 0) or 0
+        spy_change = spy.get('change_percentage', 0) or 0
+        vix_last = vix.get('last', 0) or 0
+        vix_change = vix.get('change_percentage', 0) or 0
+
+        # VIX regime classification (CBOE standards, matches market_daily_summary.py)
+        regime = None
+        multiplier = None
+        if vix_last > 0:
+            if vix_last < 15:
+                regime, multiplier = 'low_vol', 0.8
+            elif vix_last < 20:
+                regime, multiplier = 'normal', 1.0
+            elif vix_last < 30:
+                regime, multiplier = 'elevated', 1.2
+            else:
+                regime, multiplier = 'panic', 1.5
+
+        # Market direction (matches market_daily_summary.py logic)
+        if spy_change > 1.0 and vix_change < -5.0:
+            direction = "Strong Bull"
+        elif spy_change > 0.5 and vix_change < 0:
+            direction = "Bull"
+        elif spy_change < -1.0 and vix_change > 5.0:
+            direction = "Strong Bear"
+        elif spy_change < -0.5 and vix_change > 0:
+            direction = "Bear"
+        else:
+            direction = "Neutral"
+
+        trade_date = now_eastern().strftime('%Y-%m-%d')
+
+        row = {
+            'spy_close': spy_last,
+            'spy_change_percent': spy_change,
+            'spy_open': spy.get('open', None),
+            'spy_high': spy.get('high', None),
+            'spy_low': spy.get('low', None),
+            'spy_volume': spy.get('volume', None),
+            'vix_close': vix_last,
+            'vix_change_percent': vix_change,
+            'vix_open': vix.get('open', None),
+            'vix_high': vix.get('high', None),
+            'vix_low': vix.get('low', None),
+            'qqq_close': qqq.get('last', None),
+            'qqq_change_percent': qqq.get('change_percentage', None),
+            'regime_classification': regime,
+            'regime_multiplier': multiplier,
+            'market_direction': direction,
+        }
+        row = clean_database_row(row)
+
+        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'datalake.db')
+        conn = sqlite3.connect(db_path, timeout=5)
+        try:
+            # INSERT if no row exists; UPDATE only our columns if row already exists.
+            # This preserves breadth/sector data if post-market has already written the full row.
+            conn.execute("""
+                INSERT INTO market_daily_summary (
+                    trade_date, spy_close, spy_change_percent, spy_open, spy_high, spy_low, spy_volume,
+                    vix_close, vix_change_percent, vix_open, vix_high, vix_low,
+                    qqq_close, qqq_change_percent,
+                    regime_classification, regime_multiplier, market_direction,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(trade_date) DO UPDATE SET
+                    spy_close = excluded.spy_close,
+                    spy_change_percent = excluded.spy_change_percent,
+                    spy_open = excluded.spy_open,
+                    spy_high = excluded.spy_high,
+                    spy_low = excluded.spy_low,
+                    spy_volume = excluded.spy_volume,
+                    vix_close = excluded.vix_close,
+                    vix_change_percent = excluded.vix_change_percent,
+                    vix_open = excluded.vix_open,
+                    vix_high = excluded.vix_high,
+                    vix_low = excluded.vix_low,
+                    qqq_close = excluded.qqq_close,
+                    qqq_change_percent = excluded.qqq_change_percent,
+                    regime_classification = excluded.regime_classification,
+                    regime_multiplier = excluded.regime_multiplier,
+                    market_direction = excluded.market_direction,
+                    created_at = excluded.created_at
+            """, (
+                trade_date,
+                row.get('spy_close'), row.get('spy_change_percent'),
+                row.get('spy_open'), row.get('spy_high'), row.get('spy_low'), row.get('spy_volume'),
+                row.get('vix_close'), row.get('vix_change_percent'),
+                row.get('vix_open'), row.get('vix_high'), row.get('vix_low'),
+                row.get('qqq_close'), row.get('qqq_change_percent'),
+                row.get('regime_classification'), row.get('regime_multiplier'),
+                row.get('market_direction'),
+                eastern_isoformat(),
+            ))
+            conn.commit()
+        finally:
+            conn.close()
+        logging.debug("Market snapshot persisted to market_daily_summary")
+    except Exception as e:
+        logging.debug("Failed to persist market snapshot: {}".format(e))
 
 
 def get_dynamic_symbol_count():
@@ -385,15 +511,16 @@ def run_historical_backfill(health_reporter=None):
 def run_quick_sync():
     """Execute quick database sync to keep query DB current during market hours
 
-    Syncs only new scans (flow_alerts, flow_options_scans) from datalake.db
-    to datalake_query.db using watermark approach. Non-blocking if fails.
+    Syncs flow_alerts, flow_options_scans, flow_watchlist_daily, and
+    market_daily_summary from datalake.db to datalake_query.db using
+    watermark approach. Non-blocking if fails.
 
     Returns:
         tuple: (success: bool, sync_time: float, row_count: int)
     """
     try:
         start_time = time.time()
-        logging.info("Syncing flow_alerts, flow_options_scans, flow_watchlist_daily to query database")
+        logging.info("Syncing flow_alerts, flow_options_scans, flow_watchlist_daily, market_daily_summary to query database")
 
         # Execute quick-sync subprocess
         env = os.environ.copy()
