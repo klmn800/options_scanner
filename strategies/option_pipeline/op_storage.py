@@ -197,6 +197,12 @@ class OIDStorage:
                 # Add new time series columns if they don't exist
                 self._add_time_series_columns(cursor)
 
+                # Ensure performance-critical indexes exist
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_option_contracts_symbol_trade_date
+                    ON option_contracts(symbol, trade_date)
+                ''')
+
                 logging.debug("OP: Tables ensured to exist")
         except Exception as e:
             logging.error("OP: Failed to create tables: {}".format(e))
