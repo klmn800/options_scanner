@@ -164,9 +164,11 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         'Morning Option Pipeline',
         'Earnings Intelligence',
         'Metadata Collection',
+        'Trade Ingest',
         'Query Database Sync (Morning)',
         'Morning Views',
         'Flow Monitor',
+        'Trade Ingest (Post-Market)',
         'Evening Option Pipeline',
         'Query Database Sync (Evening)',
         'Airline Play Tracking',
@@ -428,8 +430,8 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         if now.hour >= 9:
             self.beautiful_log("Mid-day start ({}) - skipping to Phase 2".format(now.strftime("%I:%M %p")), 'phase')
             for key in ['1.1 Morning Option Pipeline', '1.2 Earnings Intelligence',
-                        '1.3 Metadata Collection', '1.4 Query Sync (Morning)',
-                        '1.5 Morning Views']:
+                        '1.3 Metadata Collection', '1.4 Trade Ingest',
+                        '1.5 Query Sync (Morning)', '1.6 Morning Views']:
                 results[key] = 'skipped'
 
         # Before 9:00 AM → Run morning sequence
@@ -461,20 +463,26 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
             results['1.3 Metadata Collection'] = self.run_metadata_collection()
             step_durations['1.3 Metadata Collection'] = time.time() - _t0
 
-            # Step 1.4: Query Database Sync (Morning - includes fresh metadata)
-            self.beautiful_log("Step 1.4: Query Database Sync (Morning)", 'phase')
+            # Step 1.4: Trade Ingest (catches overnight/pre-market fills)
+            self.beautiful_log("Step 1.4: Trade Ingest", 'phase')
             _t0 = time.time()
-            results['1.4 Query Sync (Morning)'] = self.run_query_database_sync()
-            step_durations['1.4 Query Sync (Morning)'] = time.time() - _t0
+            results['1.4 Trade Ingest'] = self.run_trade_ingest()
+            step_durations['1.4 Trade Ingest'] = time.time() - _t0
+
+            # Step 1.5: Query Database Sync (Morning - includes fresh metadata + trades)
+            self.beautiful_log("Step 1.5: Query Database Sync (Morning)", 'phase')
+            _t0 = time.time()
+            results['1.5 Query Sync (Morning)'] = self.run_query_database_sync()
+            step_durations['1.5 Query Sync (Morning)'] = time.time() - _t0
 
             # Brief pause before morning views
             self.coffee_break(60, "Morning cuppa to go with the news", after_step="Query Database Sync (Morning)")
 
-            # Step 1.5: Morning Views Generation
-            self.beautiful_log("Step 1.5: Morning Views Generation", 'phase')
+            # Step 1.6: Morning Views Generation
+            self.beautiful_log("Step 1.6: Morning Views Generation", 'phase')
             _t0 = time.time()
-            results['1.5 Morning Views'] = self.run_morning_views()
-            step_durations['1.5 Morning Views'] = time.time() - _t0
+            results['1.6 Morning Views'] = self.run_morning_views()
+            step_durations['1.6 Morning Views'] = time.time() - _t0
 
         # ── Phase 2: Flow Monitor ──
         self.phase_header("FLOW MONITOR", phase_number=2)
@@ -489,25 +497,32 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         # ── Phase 3: Post-Market ──
         self.phase_header("POST-MARKET OPERATIONS", phase_number=3)
 
-        # Step 3.1: Evening Option Pipeline (volume-enriched data)
+        # Step 3.1: Trade Ingest (catches all intraday fills)
         self.coffee_break(60, "Taking a well-deserved break", after_step="Flow Monitor")
-        self.beautiful_log("Step 3.1: Evening Option Pipeline", 'phase')
+        self.beautiful_log("Step 3.1: Trade Ingest (Post-Market)", 'phase')
         _t0 = time.time()
-        results['3.1 Evening Option Pipeline'] = self.run_evening_option_pipeline()
-        step_durations['3.1 Evening Option Pipeline'] = time.time() - _t0
+        results['3.1 Trade Ingest'] = self.run_trade_ingest()
+        step_durations['3.1 Trade Ingest'] = time.time() - _t0
 
-        # Step 3.2: Airline Play Tracking Phase
+        # Step 3.2: Evening Option Pipeline (volume-enriched data)
+        self.coffee_break(60, "Quick breather before evening pipeline", after_step="Trade Ingest (Post-Market)")
+        self.beautiful_log("Step 3.2: Evening Option Pipeline", 'phase')
+        _t0 = time.time()
+        results['3.2 Evening Option Pipeline'] = self.run_evening_option_pipeline()
+        step_durations['3.2 Evening Option Pipeline'] = time.time() - _t0
+
+        # Step 3.3: Airline Play Tracking Phase
         self.coffee_break(60, "Quick breather before the home stretch", after_step="Evening Option Pipeline")
-        self.beautiful_log("Step 3.2: Airline Play Tracking Phase", 'phase')
+        self.beautiful_log("Step 3.3: Airline Play Tracking Phase", 'phase')
         _t0 = time.time()
-        results['3.2 Airline Play'] = self.run_airline_play_phase()
-        step_durations['3.2 Airline Play'] = time.time() - _t0
+        results['3.3 Airline Play'] = self.run_airline_play_phase()
+        step_durations['3.3 Airline Play'] = time.time() - _t0
 
-        # Step 3.3: Query Database Sync (Final)
-        self.beautiful_log("Step 3.3: Query Database Sync (Final)", 'phase')
+        # Step 3.4: Query Database Sync (Final)
+        self.beautiful_log("Step 3.4: Query Database Sync (Final)", 'phase')
         _t0 = time.time()
-        results['3.3 Query Sync (Final)'] = self.run_query_database_sync()
-        step_durations['3.3 Query Sync (Final)'] = time.time() - _t0
+        results['3.4 Query Sync (Final)'] = self.run_query_database_sync()
+        step_durations['3.4 Query Sync (Final)'] = time.time() - _t0
 
         # ── Phase 4: Evening Operations ──
         self.phase_header("EVENING OPERATIONS", phase_number=4)
@@ -624,6 +639,8 @@ Testing with Time Simulation (auto-expires after 4 hours by default):
                            help='Run Airline Play tracking only')
     mode_group.add_argument('--fm-baseline', action='store_true',
                            help='Run FM baseline update only')
+    mode_group.add_argument('--trade-ingest', action='store_true',
+                           help='Run trade ingest only (parse Robinhood emails)')
 
     # Additional options
     parser.add_argument('--debug', action='store_true',
@@ -711,6 +728,10 @@ def main():
             orchestrator.print_banner("fm-baseline")
             result = orchestrator.run_fm_baseline_update()
             success = result.get('success', False)
+        elif args.trade_ingest:
+            orchestrator.print_banner("trade-ingest")
+            result = orchestrator.run_trade_ingest()
+            success = result.get('success', False) if isinstance(result, dict) else bool(result)
         else:
             # Default: Run one complete daily cycle
             orchestrator.print_banner("full")

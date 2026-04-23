@@ -154,7 +154,10 @@ def format_database_values(data_dict, column_types=None):
         'snapshot_date', 'is_primary_symbol', 'earnings_time', 'source', 'is_backfilled', 'note_type', 'sentiment', 'tags',
         'notes', 'peer_type', 'calculated_at',
         # Roll detection fields
-        'roll_counterpart_details'
+        'roll_counterpart_details',
+        # Trade execution fields
+        'action', 'instrument_type', 'position_key', 'broker',
+        'email_message_id', 'robinhood_order_id', 'trade_call_ref', 'review_status'
     }
 
     # Add quarterly date fields to skip list

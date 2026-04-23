@@ -648,7 +648,7 @@ def _write_op_performance(cursor, trade_date, day_of_week, recorded_at,
 
     op_mapping = {
         '1.1 Morning Option Pipeline': 'morning',
-        '3.1 Evening Option Pipeline': 'evening',
+        '3.2 Evening Option Pipeline': 'evening',
     }
 
     for step_name, run_type in op_mapping.items():
@@ -1084,7 +1084,7 @@ def _write_subprocess_tables(cursor, trade_date, day_of_week, recorded_at,
         rows += 1
 
     # Table 9: morning_views_performance
-    mv_result = results.get('1.5 Morning Views')
+    mv_result = results.get('1.6 Morning Views')
     if mv_result is not None and mv_result != 'skipped':
         email_sent = None
         if isinstance(mv_result, dict) and mv_result.get('stdout'):
@@ -1095,7 +1095,7 @@ def _write_subprocess_tables(cursor, trade_date, day_of_week, recorded_at,
             "(trade_date, day_of_week, duration_seconds, success, email_sent, recorded_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (trade_date, day_of_week,
-             _r(step_durations.get('1.5 Morning Views')),
+             _r(step_durations.get('1.6 Morning Views')),
              _result_success(mv_result),
              email_sent,
              recorded_at)
@@ -1150,7 +1150,7 @@ def _write_subprocess_tables(cursor, trade_date, day_of_week, recorded_at,
         rows += 1
 
     # Table 12: airline_play_performance
-    airline_result = results.get('3.2 Airline Play')
+    airline_result = results.get('3.3 Airline Play')
     if airline_result is not None and airline_result != 'skipped':
         cursor.execute(
             "INSERT OR REPLACE INTO airline_play_performance "
@@ -1158,7 +1158,7 @@ def _write_subprocess_tables(cursor, trade_date, day_of_week, recorded_at,
             "symbols_processed, symbols_failed, contracts_tracked, recorded_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (trade_date, day_of_week,
-             _r(step_durations.get('3.2 Airline Play')),
+             _r(step_durations.get('3.3 Airline Play')),
              _result_success(airline_result),
              airline_result.get('symbols_processed') if isinstance(airline_result, dict) else None,
              airline_result.get('symbols_failed', 0) if isinstance(airline_result, dict) else None,

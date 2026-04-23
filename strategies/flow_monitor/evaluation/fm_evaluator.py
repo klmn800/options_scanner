@@ -102,9 +102,17 @@ class AlertEvaluator:
                 else:
                     logging.debug("All required tables present")
 
+                # Recreate view if it has the old expiration_date filter (survivorship bias fix)
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='view' AND name='active_alerts_for_evaluation'")
+                view_row = cursor.fetchone()
+                if view_row and 'expiration_date' in (view_row[0] or ''):
+                    logging.info("Dropping old active_alerts_for_evaluation view (removing expiration_date filter)")
+                    cursor.execute("DROP VIEW active_alerts_for_evaluation")
+                    conn.commit()
+                    view_row = None
+
                 # Create required views if they don't exist
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='view' AND name='active_alerts_for_evaluation'")
-                if not cursor.fetchone():
+                if not view_row:
                     logging.debug("Creating active_alerts_for_evaluation view...")
                     cursor.execute('''
                         CREATE VIEW active_alerts_for_evaluation AS
@@ -114,14 +122,12 @@ class AlertEvaluator:
                             SELECT contract_hash, MIN(alert_timestamp) as first_alert
                             FROM flow_alerts
                             WHERE (evaluation_status IS NULL OR evaluation_status = 'active')
-                              AND datetime(expiration_date) > datetime('now')
                               AND datetime(alert_timestamp) > datetime('now', '-30 days')
                             GROUP BY contract_hash
                         ) first_alerts
                         ON fa.contract_hash = first_alerts.contract_hash
                         AND fa.alert_timestamp = first_alerts.first_alert
                         WHERE (fa.evaluation_status IS NULL OR fa.evaluation_status = 'active')
-                          AND datetime(fa.expiration_date) > datetime('now')
                     ''')
                     conn.commit()
                     logging.debug("Created active_alerts_for_evaluation view")
@@ -1106,13 +1112,19 @@ class AlertEvaluator:
                         column = profit_timeframe_map[hours]
                         updates.append("{} = MAX(COALESCE({}, 0), ?)".format(column, column))
                         params.append(gain_pct)
-                    elif gain_pct < 0 and hours in loss_timeframe_map:
+                    else:
+                        # gain_pct <= 0: confirmed loser for this timeframe.
+                        # Write 0.0 to profit column so NULL means "not yet evaluated"
+                        # rather than "evaluated, was a loser" (survivorship bias fix).
+                        column = profit_timeframe_map[hours]
+                        updates.append("{} = COALESCE({}, 0)".format(column, column))
+                    if gain_pct < 0 and hours in loss_timeframe_map:
                         column = loss_timeframe_map[hours]
                         updates.append("{} = MIN(COALESCE({}, 0), ?)".format(column, column))
                         params.append(gain_pct)
             
             if not updates:
-                return True  # No positive gains to update
+                return True  # No timeframe data to update
             
             # Always update last_evaluated_date
             updates.append("last_evaluated_date = ?")

@@ -62,38 +62,71 @@ agents/{agent_name}/
 
 ### 1. Write Guard (MANDATORY)
 
-A hook in the **parent** `.claude/hooks/` directory that hard-blocks writes outside the agent's workspace.
+A hook in the **parent** `.claude/hooks/` directory that hard-blocks writes outside the agent's workspace. Lives outside the agent's workspace so the agent cannot edit its own guard.
 
 **Location:** `.claude/hooks/{agent_name}_write_guard.py`
 
-**What it blocks:**
-- Any file outside `agents/{agent_name}/`
-- Production code (`*.py` outside workspace)
-- Databases (all `.db` files)
-- Other agents' workspaces (redirect to outbound mailbox)
-- Auto-memory (`~/.claude/memory/`)
-- Parent CLAUDE.md and settings
+**What it blocks (with contextual guidance):**
+- Production code (`*.py` outside workspace) — "write a proposal or update bugs.md"
+- Databases (all `.db` files) — "use direct_db_query.py to read"
+- Other agents' workspaces — "use your outbound mailbox instead"
+- Settings files — "propose the change, Ben will review"
+- Anything else outside workspace — "write to memory/, proposals/, or create a subdirectory"
 
-**What it permits:**
+**What it always permits:**
 - `agents/{agent_name}/memory/` — persistent state
 - `agents/{agent_name}/reference/` — knowledge library
 - `agents/{agent_name}/analysis/` — output artifacts
 - `agents/{agent_name}/hooks/` — may self-edit own hooks
 - `agents/{agent_name}/notes_for_ben.md`, `bugs.md`, etc.
 
-### 2. CLAUDE.md Isolation (MANDATORY)
+**Per-agent exceptions (configurable):**
+Some agents may be granted write access beyond their workspace. For example, the System Analyst can write to:
+- `~/.claude/projects/.../memory/` — to update auto-memory so Ben's dev sessions have context
 
-In `.claude/settings.local.json`:
+Exceptions are added as additional allowed prefixes in the write guard script. Document them in the guard's header comment.
+
+### 2. Settings Isolation (MANDATORY)
+
+The agent's `.claude/settings.local.json` serves three purposes:
+
+1. **Excludes the parent CLAUDE.md** (developer instructions, not for the agent)
+2. **Configures hooks** (write guard + context injection)
+3. **Controls permissions** (allow python for queries, deny sqlite3 CLI)
+
 ```json
 {
   "permissions": {
-    "allow": ["Bash(*)","Read(*)","Glob(*)","Grep(*)","WebFetch(*)","WebSearch(*)"],
-    "deny": ["Write(*)", "Edit(*)"]
+    "allow": ["Bash(python *)"],
+    "deny": ["Bash(sqlite3 *)"]
+  },
+  "claudeMdExcludes": ["E:/options_scanner/CLAUDE.md"],
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [{
+          "type": "command",
+          "command": "python E:/options_scanner/agents/{agent_name}/hooks/inject_context.py",
+          "timeout": 10000
+        }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [{
+          "type": "command",
+          "command": "python E:/options_scanner/.claude/hooks/{agent_name}_write_guard.py",
+          "timeout": 5000
+        }]
+      }
+    ]
   }
 }
 ```
 
-The write guard hook handles granular write permissions. The settings.local.json ensures the agent doesn't inherit the parent project's CLAUDE.md instructions (which are for the developer, not the agent).
+The write guard hook (in the parent `.claude/hooks/`) handles granular write permissions. The `sqlite3` deny prevents direct database CLI access — agents should use `direct_db_query.py` which opens databases in read-only mode.
 
 ### 3. Read-Only Database Access (MANDATORY)
 
@@ -105,13 +138,17 @@ python tools/direct_db_query.py --db E:/options_scanner/data/datalake_query.db -
 
 ### 4. Git Isolation (MANDATORY)
 
-Each agent has its own `.git/` so Claude Code's auto-memory stays scoped to that agent. Without this, memory from one agent could leak into another's context.
+Each agent has its own `.git/` which serves two critical purposes:
+
+1. **Project root detection:** Claude Code identifies the project root by finding the nearest `.git/`. Without it, the agent's `.claude/settings.local.json` would be ignored — Claude Code would walk up to the parent repo's `.git/` and load the parent's settings instead (which are Ben's dev settings, not the agent's).
+
+2. **Memory isolation:** Claude Code's auto-memory is scoped per project. Without a separate `.git/`, memory from one agent could leak into another's context.
 
 ```bash
 cd agents/{agent_name} && git init
 ```
 
-No commits required — the repo just needs to exist for namespace isolation.
+No commits required — the repo just needs to exist. The parent `.gitignore` should include `agents/{agent_name}/` to prevent the parent repo from treating it as a submodule.
 
 ---
 
@@ -219,33 +256,32 @@ See `agents/system_analyst/launcher.py` for the reference implementation.
 
 ## Context Injection Hooks
 
-For agents that need live context (market state, time, positions), use a `UserPromptSubmit` hook.
+Every agent needs a `UserPromptSubmit` hook to inject context. Two patterns exist:
 
-**Pattern:** `hooks/inject_context.py`
+### Pattern A: CLAUDE.md Injection (all agents)
+
+Since each agent has its own `.git/` project root, it doesn't automatically load the parent project's CLAUDE.md. The hook reads and injects it so the agent has full system context (architecture, DB schemas, conventions).
 
 ```python
-# Fires on every user prompt
-# Injects:
-#   - Current datetime (ET) and market session (pre/open/post/weekend)
-#   - Market summary (regime, SPY, VIX)
-#   - Top alerts or relevant data
-#   - Open positions from memory files
-# Gated with cooldown (e.g., 5 min) to avoid noise
+# hooks/inject_context.py — minimal version
+# Reads E:\options_scanner\CLAUDE.md and outputs it as additionalContext
+# See agents/system_analyst/hooks/inject_context.py
 ```
 
-Configure in `.claude/settings.local.json`:
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "command": "python hooks/inject_context.py",
-        "timeout": 10000
-      }
-    ]
-  }
-}
+### Pattern B: Live Context (interactive agents)
+
+For agents that interact during market hours, inject live state on top of CLAUDE.md:
+- Current datetime (ET) and market session (pre/open/post/weekend)
+- Market summary (regime, SPY, VIX)
+- Top alerts or relevant data
+- Open positions from memory files
+- Gated with cooldown (e.g., 5 min) to avoid noise
+
+```python
+# See agents/trading_advisor/hooks/inject_context.py for full implementation
 ```
+
+Configuration is in `.claude/settings.local.json` (see Settings Isolation section above).
 
 ---
 
