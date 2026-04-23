@@ -61,11 +61,12 @@ def run_daily_pipeline():
 
     Sub-steps:
     1. Snapshot collection (IV/price for upcoming earnings)
-    2. Post-earnings calculation (for T-3 day events)
-    3. Expected moves update (for all upcoming events)
-    4. Watchlist population (earnings_watchlist table)
-    5. News enrichment (Alpha Vantage sentiment for new/T-1 symbols)
-    6. Arbitrage scan (sector sympathy opportunities)
+    2. Archive past earnings (earnings_upcoming → earnings_events)
+    3. Post-earnings calculation (for T-3 day events)
+    4. Expected moves update (for all upcoming events)
+    5. Watchlist population (earnings_watchlist table)
+    6. News enrichment (Alpha Vantage sentiment for new/T-1 symbols)
+    7. Arbitrage scan (sector sympathy opportunities)
 
     Returns:
         dict: Structured result with success, sub_tasks, alert_details, and summary metrics
@@ -86,6 +87,7 @@ def run_daily_pipeline():
 
     # Initialize metrics
     snapshot_results = {'snapshots_created': 0, 'events_processed': 0, 'errors': 0}
+    archive_results = {'archived': 0}
     calc_results = {'moves_calculated': 0, 'events_ready': 0, 'errors': 0}
     moves_results = {'processed': 0, 'failed': 0, 'alerts': 0, 'alert_details': []}
     watchlist_results = {'watchlist_count': 0, 'watchlist_new': 0, 'symbols': []}
@@ -134,9 +136,57 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Snapshot Collection', False, error=str(e))
         snapshot_time = time.time() - snapshot_start
 
-        # Sub-step 2: Post-earnings calculation
+        # Sub-step 2: Archive past earnings (earnings_upcoming → earnings_events)
         print("")
-        beautiful_log("Post-Earnings Calculation (2/6)", 'info')
+        beautiful_log("Archive Past Earnings (2/7)", 'info')
+        beautiful_log("Moving past-date earnings to events archive", 'info')
+        logging.info("   ├─ Source: earnings_upcoming WHERE earnings_date < today")
+        logging.info("   └─ Target: earnings_events (INSERT OR IGNORE, preserves signals)")
+        archive_start = time.time()
+        archive_success = True
+        try:
+            db_path = os.path.join(project_root, 'data', 'datalake.db')
+            conn = sqlite3.connect(db_path, timeout=30)
+            conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA journal_mode = WAL")
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR IGNORE INTO earnings_events
+                    (symbol, earnings_date, fiscal_year, fiscal_quarter,
+                     estimated_eps, actual_eps, earnings_time, source, is_backfilled,
+                     earnings_play_signal, relative_underpricing_pct,
+                     expected_move_pct, straddle_expected_move_pct,
+                     historical_avg_move_pct, historical_avg_move_alltime_pct,
+                     historical_quarters_used, eps_estimate, revenue_estimate)
+                SELECT
+                    symbol, earnings_date, NULL, NULL,
+                    NULL, NULL, earnings_time, 'earnings_upcoming', 0,
+                    earnings_play_signal, relative_underpricing_pct,
+                    expected_move_pct, straddle_expected_move_pct,
+                    historical_avg_move_pct, historical_avg_move_alltime_pct,
+                    historical_quarters_used, eps_estimate, revenue_estimate
+                FROM earnings_upcoming
+                WHERE earnings_date < DATE('now')
+                AND earnings_date IS NOT NULL
+            """)
+            archived = cursor.rowcount
+            conn.commit()
+            conn.close()
+            archive_results = {'archived': archived}
+            logging.info("   Archived {} past events".format(archived))
+            health_reporter.track_task_result(
+                'Archive Past Earnings', True,
+                events_archived=archived,
+                duration=time.time() - archive_start)
+        except Exception as e:
+            logging.warning("   Archive failed: {}".format(e))
+            archive_success = False
+            health_reporter.track_task_result('Archive Past Earnings', False, error=str(e))
+        archive_time = time.time() - archive_start
+
+        # Sub-step 3: Post-earnings calculation
+        print("")
+        beautiful_log("Post-Earnings Calculation (3/7)", 'info')
         beautiful_log("Calculating price moves and IV crush for T+3 events", 'info')
         logging.info("   ├─ Sources: earnings_snapshots → historical_prices fallback")
         calc_start = time.time()
@@ -159,9 +209,9 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Post-Earnings Calculation', False, error=str(e))
         calc_time = time.time() - calc_start
 
-        # Sub-step 3: Expected moves update (check if exists first)
+        # Sub-step 4: Expected moves update (check if exists first)
         print("")
-        beautiful_log("Expected Moves Update (3/6)", 'info')
+        beautiful_log("Expected Moves Update (4/7)", 'info')
         beautiful_log("Recalculating signals with latest IV data", 'info')
         logging.info("   ├─ Methods: ATM straddle (primary) + IV-based (fallback)")
         logging.info("   └─ Universe: all symbols with earnings_date >= today")
@@ -188,9 +238,9 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Expected Moves Update', True, skipped=True)
         moves_time = time.time() - moves_start
 
-        # Sub-step 4: Watchlist population
+        # Sub-step 5: Watchlist population
         print("")
-        beautiful_log("Watchlist Population (4/6)", 'info')
+        beautiful_log("Watchlist Population (5/7)", 'info')
         beautiful_log("Filtering to actionable earnings plays", 'info')
         logging.info("   ├─ Entry: signal >= WATCH, <=14 days, OI >= 4,000")
         logging.info("   └─ Lifecycle: UPCOMING → TODAY → T+1 → T+2 → T+3 → delete T+4")
@@ -218,9 +268,9 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Watchlist Population', False, error=str(e))
         watchlist_time = time.time() - watchlist_start
 
-        # Sub-step 5: News enrichment (depends on sub-step 4)
+        # Sub-step 6: News enrichment (depends on sub-step 5)
         print("")
-        beautiful_log("News Enrichment (5/6)", 'info')
+        beautiful_log("News Enrichment (6/7)", 'info')
         beautiful_log("Adding news sentiment scores to earnings watchlist", 'info')
         logging.info("   ├─ Retrieving articles and sentiment scores from Alpha Vantage")
         logging.info("   ├─ Targets: new watchlist entries + T-1 symbols")
@@ -405,7 +455,7 @@ def run_daily_pipeline():
             health_reporter.track_task_result('News Enrichment', False, error=str(e))
         news_time = time.time() - news_start
 
-        # Sub-step 6: Arbitrage scan (independent of other sub-steps)
+        # Sub-step 7: Arbitrage scan (independent of other sub-steps)
         # Scans for sector sympathy IV plays: when a stock reports earnings,
         # its industry peers often see correlated moves. The scanner finds peers
         # with cheap IV relative to the primary's buildup, scores them by
@@ -413,7 +463,7 @@ def run_daily_pipeline():
         # Currently in development — needs historical data to accumulate in
         # earnings_sector_effects before the correlation component adds value.
         print("")
-        beautiful_log("Arbitrage Scan (6/6)", 'info')
+        beautiful_log("Arbitrage Scan (7/7)", 'info')
         beautiful_log("Scanning for sector sympathy IV opportunities", 'info')
         logging.info("   ├─ Finds peers with cheap IV when a stock reports earnings")
         logging.info("   └─ Status: in development — accumulating historical correlation data")
@@ -457,8 +507,9 @@ def run_daily_pipeline():
         # itself didn't crash, even if individual sub-steps failed)
         all_success = True
         total_time = time.time() - mode_start
-        sub_successes = [snapshot_success, calc_success, moves_success,
-                         watchlist_success, news_success, arb_success]
+        sub_successes = [snapshot_success, archive_success, calc_success,
+                         moves_success, watchlist_success, news_success,
+                         arb_success]
         tasks_successful = sum(sub_successes)
         total_errors = (snapshot_results.get('errors', 0) +
                         calc_results.get('errors', 0) +
@@ -471,6 +522,8 @@ def run_daily_pipeline():
             snapshots_created=snapshot_results.get('snapshots_created', 0),
             events_processed=snapshot_results.get('events_processed', 0),
             snapshot_time=snapshot_time,
+            events_archived=archive_results.get('archived', 0),
+            archive_time=archive_time,
             moves_calculated=calc_results.get('moves_calculated', 0),
             events_ready=calc_results.get('events_ready', 0),
             calc_time=calc_time,
@@ -485,7 +538,7 @@ def run_daily_pipeline():
             arb_time=arb_time,
             total_time=total_time,
             tasks_successful=tasks_successful,
-            total_sub_steps=6
+            total_sub_steps=7
         )
 
         # Generate health report
@@ -507,6 +560,11 @@ def run_daily_pipeline():
                     'snapshots_created': snapshot_results.get('snapshots_created', 0),
                     'snapshots_skipped': snapshot_results.get('snapshots_skipped', 0),
                     'errors': snapshot_results.get('errors', 0),
+                },
+                'archive': {
+                    'success': archive_success,
+                    'duration_seconds': archive_time,
+                    'events_archived': archive_results.get('archived', 0),
                 },
                 'calculations': {
                     'success': calc_success,
@@ -595,7 +653,7 @@ def run_daily_pipeline():
 def run_morning_scan():
     """Execute morning arbitrage scan mode (6:30 AM daily)
 
-    NOTE: As of PRD 0008, the arbitrage scan is also available as sub-step 6
+    NOTE: As of PRD 0008, the arbitrage scan is also available as sub-step 7
     of run_daily_pipeline(). This standalone function is kept for backward
     compatibility with main.py Step 1.2 until the orchestrator is updated.
 
@@ -869,12 +927,17 @@ def log_diagnostic_summary(diag_logger, mode, **metrics):
         now = now_eastern().strftime('%Y-%m-%d %H:%M:%S')
 
         if mode == 'daily-pipeline':
-            # Daily pipeline summary (6 sub-steps)
+            # Daily pipeline summary (7 sub-steps)
             diag_logger.info("[{}] Snapshots: {} created | {} events processed | {:.1f}s".format(
                 now,
                 metrics.get('snapshots_created', 0),
                 metrics.get('events_processed', 0),
                 metrics.get('snapshot_time', 0)
+            ))
+            diag_logger.info("[{}] Archive: {} events archived | {:.1f}s".format(
+                now,
+                metrics.get('events_archived', 0),
+                metrics.get('archive_time', 0)
             ))
             diag_logger.info("[{}] Post-Calc: {} moves calculated | {} events analyzed | {:.1f}s".format(
                 now,
