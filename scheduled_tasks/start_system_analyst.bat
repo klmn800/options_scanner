@@ -1,4 +1,4 @@
 @echo off
 cd /d E:\options_scanner
 python agents/system_analyst/launcher.py --prepare-only
-wt -w 0 new-tab --title "System Analyst" cmd /k "cd /d E:\options_scanner && claude --permission-mode bypassPermissions @agents/system_analyst/.session_prompt.md"
+wt -w 0 new-tab --title "System Analyst" cmd /k "cd /d E:\options_scanner\agents\system_analyst && claude --permission-mode bypassPermissions @.session_prompt.md"
