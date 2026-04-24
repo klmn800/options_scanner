@@ -352,7 +352,7 @@ class DirectDBQuery:
         """
         return self.execute_query(sql)
 
-    def execute_raw_sql(self, sql, output_format='table'):
+    def execute_raw_sql(self, sql, output_format='table', commit=False):
         """Execute raw SQL and return results in specified format"""
         try:
             conn = self._get_connection_with_sync_check()
@@ -362,11 +362,25 @@ class DirectDBQuery:
             # Handle multiple statements
             statements = [stmt.strip() for stmt in sql.split(';') if stmt.strip()]
             all_results = []
+            has_writes = False
 
             for stmt in statements:
                 cursor.execute(stmt)
+                if not stmt.upper().startswith('SELECT'):
+                    has_writes = True
                 results = cursor.fetchall()
                 all_results.append([dict(row) for row in results])
+
+            if has_writes:
+                if commit:
+                    conn.commit()
+                else:
+                    conn.rollback()
+                    warning = "WARNING: Write statement detected but --write flag not passed. Changes rolled back. Use --write to persist."
+                    if output_format == 'json':
+                        return json.dumps({"warning": warning})
+                    else:
+                        return warning
 
             conn.close()
 
@@ -485,7 +499,7 @@ class DirectDBQuery:
 
         return "\n".join(output)
 
-    def execute_multi_query(self, queries, output_format='table'):
+    def execute_multi_query(self, queries, output_format='table', commit=False):
         """Execute multiple queries and return combined results"""
         all_outputs = []
 
@@ -498,7 +512,7 @@ class DirectDBQuery:
                 all_outputs.append("Query {}: {}".format(i+1, query))
                 all_outputs.append("-" * 40)
 
-            result = self.execute_raw_sql(query, output_format)
+            result = self.execute_raw_sql(query, output_format, commit=commit)
             all_outputs.append(result)
 
             if output_format == 'table' and i < len(queries) - 1:
@@ -537,6 +551,8 @@ Examples:
     parser.add_argument('--tables', action='store_true', help='List all tables')
     parser.add_argument('--multi', help='Execute multiple SQL queries (semicolon separated)')
     parser.add_argument('--json', action='store_true', help='Output results as JSON')
+    parser.add_argument('--write', action='store_true',
+                       help='Commit non-SELECT statements (UPDATE/INSERT/DELETE). Without this flag, writes are rolled back.')
     parser.add_argument('--db', default='data/datalake_query.db',
                        help='Database path (default: data/datalake_query.db). Use data/datalake.db for primary, data/performance.db for operational metrics, or data/sector_archive/*.db for archives')
 
@@ -553,7 +569,7 @@ Examples:
 
     # Handle new enhanced features
     if args.sql:
-        result = db.execute_raw_sql(args.sql, output_format)
+        result = db.execute_raw_sql(args.sql, output_format, commit=args.write)
         print(result)
         return
 
@@ -588,7 +604,7 @@ Examples:
 
     if args.multi:
         queries = [q.strip() for q in args.multi.split(';') if q.strip()]
-        result = db.execute_multi_query(queries, output_format)
+        result = db.execute_multi_query(queries, output_format, commit=args.write)
         print(result)
         return
 
