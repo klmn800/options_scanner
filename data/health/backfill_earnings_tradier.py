@@ -428,29 +428,49 @@ def compute_moves(conn, symbol, earnings_date, earnings_time):
 
     def get_close_on_or_before(target_date):
         cursor.execute("""
-            SELECT close_price FROM historical_prices
+            SELECT close_price, trade_date FROM historical_prices
             WHERE symbol = ? AND trade_date <= ?
             ORDER BY trade_date DESC LIMIT 1
         """, (symbol, target_date))
         row = cursor.fetchone()
-        return row['close_price'] if row else None
+        if not row:
+            return None
+        # Reject if matched price is more than 10 calendar days away (no nearby data)
+        matched = datetime.strptime(row['trade_date'], '%Y-%m-%d')
+        target = datetime.strptime(target_date, '%Y-%m-%d')
+        if abs((target - matched).days) > 10:
+            return None
+        return row['close_price']
 
     def get_close_on_or_after(target_date):
         cursor.execute("""
-            SELECT close_price FROM historical_prices
+            SELECT close_price, trade_date FROM historical_prices
             WHERE symbol = ? AND trade_date >= ?
             ORDER BY trade_date ASC LIMIT 1
         """, (symbol, target_date))
         row = cursor.fetchone()
-        return row['close_price'] if row else None
+        if not row:
+            return None
+        matched = datetime.strptime(row['trade_date'], '%Y-%m-%d')
+        target = datetime.strptime(target_date, '%Y-%m-%d')
+        if abs((target - matched).days) > 10:
+            return None
+        return row['close_price']
 
     def get_ohlc_on_or_after(target_date):
         cursor.execute("""
-            SELECT open_price, high_price, low_price, close_price FROM historical_prices
+            SELECT open_price, high_price, low_price, close_price, trade_date FROM historical_prices
             WHERE symbol = ? AND trade_date >= ?
             ORDER BY trade_date ASC LIMIT 1
         """, (symbol, target_date))
-        return cursor.fetchone()
+        row = cursor.fetchone()
+        if not row:
+            return None
+        matched = datetime.strptime(row['trade_date'], '%Y-%m-%d')
+        target = datetime.strptime(target_date, '%Y-%m-%d')
+        if abs((target - matched).days) > 10:
+            return None
+        return row
 
     is_amc = earnings_time and earnings_time.lower() == 'amc'
     earnings_dt = datetime.strptime(earnings_date, '%Y-%m-%d')
