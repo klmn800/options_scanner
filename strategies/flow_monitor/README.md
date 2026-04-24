@@ -123,7 +123,7 @@ Evaluation logs are written to `evaluation/logs/` and auto-purged to last 30 day
 ### Key Behaviors
 
 - **`flow_watchlist_daily`** deduplicates: one entry per symbol per `entry_date`. Multiple alerts for the same symbol on the same day increment `alert_count_today` on the existing entry.
-- **Alert resolution** uses fuzzy logic: OI change >= 70% of alert volume → BUILDING or CLOSING. Below threshold → NEUTRAL.
+- **Alert resolution** uses dual thresholds: OI change >= 50% of alert volume OR >= 10% of prior OI → BUILDING or CLOSING. Neither met → NEUTRAL.
 - **Watchlist sentiment** is recency-based: only the most recent resolution date's signals determine the sentiment label.
 - **Email dedup**: `last_email_date` column prevents multiple dip notification emails per symbol per day. Resets automatically by date comparison (no manual reset needed).
 - **`flow_symbol_summary`** is selectively populated — only symbols with `alert_threshold_met = 1` get rows. No zero-alert padding.
@@ -181,7 +181,7 @@ Normal cycle completion:
 - **Problem if**: Alerts exist but aren't being found. Check that Option Pipeline ran its morning collection (need fresh OI in `option_contracts` for today's date).
 
 ### Watchlist sentiment always NEUTRAL
-- **Normal if**: Market is choppy (OI changes below 70% threshold) or system just started (no resolutions yet)
+- **Normal if**: Market is choppy (OI changes below both 50% volume and 10% OI thresholds) or system just started (no resolutions yet)
 - **Check**: `SELECT COUNT(*) FROM flow_alerts WHERE oi_resolution IS NOT NULL` — if 0, resolutions aren't running
 
 ### Cycles exceeding 25 minutes

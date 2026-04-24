@@ -10,6 +10,7 @@ Usage:
     python tools/symbol_lifecycle.py --offboard ACME     # Move to purgatory
     python tools/symbol_lifecycle.py --restore ACME      # Restore from purgatory
     python tools/symbol_lifecycle.py --move-tier ACME    # Change tier (fm_universe <-> daily_only)
+    python tools/symbol_lifecycle.py --rename PSTG P     # Rename ticker across all DBs
     python tools/symbol_lifecycle.py --list              # Universe dashboard
     python tools/symbol_lifecycle.py --review            # Review pending suspects
 
@@ -63,6 +64,12 @@ def cmd_list():
     list_universe(get_db_path())
 
 
+def cmd_rename(old_symbol, new_symbol):
+    """Rename a symbol across all databases."""
+    from tools.lifecycle.renaming import rename_symbol
+    rename_symbol(old_symbol, new_symbol, get_db_path())
+
+
 def cmd_review():
     """Review pending lifecycle suspects."""
     from tools.lifecycle.offboarding import review_pending
@@ -79,6 +86,7 @@ Examples:
   %(prog)s --offboard ACME     Move ACME to purgatory
   %(prog)s --restore ACME      Restore ACME from purgatory
   %(prog)s --move-tier ACME    Change tier (fm_universe <-> daily_only)
+  %(prog)s --rename PSTG P     Rename ticker across all databases
   %(prog)s --list              Show universe dashboard
   %(prog)s --review            Review pending lifecycle actions
         """)
@@ -88,6 +96,7 @@ Examples:
     group.add_argument('--offboard', metavar='SYMBOL', help='Move symbol to purgatory')
     group.add_argument('--restore', metavar='SYMBOL', help='Restore symbol from purgatory')
     group.add_argument('--move-tier', metavar='SYMBOL', help='Change tier (fm_universe <-> daily_only)')
+    group.add_argument('--rename', nargs=2, metavar=('OLD', 'NEW'), help='Rename ticker across all databases')
     group.add_argument('--list', action='store_true', help='Show universe dashboard')
     group.add_argument('--review', action='store_true', help='Review pending suspects')
 
@@ -101,6 +110,8 @@ Examples:
         cmd_restore(args.restore.upper())
     elif args.move_tier:
         cmd_move_tier(args.move_tier.upper())
+    elif args.rename:
+        cmd_rename(args.rename[0].upper(), args.rename[1].upper())
     elif args.list:
         cmd_list()
     elif args.review:

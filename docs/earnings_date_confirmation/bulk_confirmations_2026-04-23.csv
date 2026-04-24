@@ -1,0 +1,48 @@
+# Verified by Ben via Robinhood on 2026-04-23
+# Format: symbol,date,time
+# Use with: python tools/earnings_confirm.py --bulk-file docs/earnings_date_confirmation/bulk_confirmations_2026-04-23.csv
+#
+# === Correct dates, Unknown time resolved ===
+CDNS,2026-04-27,amc
+VZ,2026-04-27,bmo
+TMUS,2026-04-28,amc
+AMT,2026-04-28,bmo
+EBAY,2026-04-29,amc
+ORLY,2026-04-29,amc
+REGN,2026-04-29,bmo
+MRK,2026-04-30,bmo
+RBLX,2026-04-30,amc
+BMY,2026-04-30,bmo
+BEPC,2026-05-01,bmo
+PLTR,2026-05-04,amc
+VRTX,2026-05-04,amc
+PFE,2026-05-05,bmo
+MSTR,2026-05-05,amc
+FLUT,2026-05-06,amc
+MELI,2026-05-07,amc
+ALAB,2026-05-05,amc
+GO,2026-05-05,amc
+GMED,2026-05-07,amc
+#
+# === Correct dates AND times (bmo/amc already correct in DB) ===
+GM,2026-04-28,bmo
+GLW,2026-04-28,bmo
+AMZN,2026-04-29,amc
+RCL,2026-04-30,bmo
+DVN,2026-05-05,amc
+IDXX,2026-05-05,bmo
+ARM,2026-05-06,amc
+BROS,2026-05-06,amc
+BILL,2026-05-07,amc
+#
+# === Correct dates, WRONG times (time override) ===
+ON,2026-05-04,amc
+XRAY,2026-05-07,amc
+#
+# === WRONG dates (date + time override) ===
+GILD,2026-05-07,amc
+VALE,2026-05-05,amc
+CRI,2026-05-05,bmo
+LEG,2026-05-05,amc
+AES,2026-05-05,bmo
+APLS,2026-05-06,bmo

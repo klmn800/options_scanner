@@ -1181,18 +1181,21 @@ class OrchestratorRunnersMixin:
         """Run unified Earnings Intelligence pipeline (PRD 0008)
 
         Replaces both run_earnings_pipeline() and run_earnings_morning_scan().
-        Calls the 6-sub-step run_daily_pipeline() which handles snapshots,
-        post-earnings calc, expected moves, watchlist, news, and arbitrage.
+        Calls the 8-sub-step run_daily_pipeline() which handles lite refresh,
+        snapshots, archive, post-earnings calc, expected moves, watchlist,
+        news, and arbitrage.
         """
         self.create_status_box(
             "📈 EARNINGS INTELLIGENCE",
             [
-                "Step 1: IV/price snapshot collection (T-7 to T+3 window)",
-                "Step 2: Post-earnings calculation (price moves, IV crush)",
-                "Step 3: Expected moves & signal recalculation",
-                "Step 4: Earnings watchlist population",
-                "Step 5: News sentiment enrichment (Alpha Vantage)",
-                "Step 6: Sector sympathy arbitrage scan",
+                "Step 1: Lite earnings refresh (near-term date verification)",
+                "Step 2: IV/price snapshot collection (T-7 to T+5 window)",
+                "Step 3: Archive past earnings to events",
+                "Step 4: Post-earnings calculation (price moves, IV crush)",
+                "Step 5: Expected moves & signal recalculation",
+                "Step 6: Earnings watchlist population",
+                "Step 7: News sentiment enrichment (Alpha Vantage)",
+                "Step 8: Sector sympathy arbitrage scan",
                 "Output: earnings_watchlist, earnings_moves, alerts"
             ]
         )

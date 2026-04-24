@@ -13,7 +13,19 @@ Your job is not to speculate. Its to find the correct answer, or admit when you 
 
 ## CRITICAL: DATABASE SYNC RESTRICTION
 
-**NEVER run `python data/health/db_backup.py --sync` without explicit user approval.** Syncs production DB to query DB. Running during market hours interrupts live data collection. Always explain why, ask, and wait for YES.
+**NEVER run `python data/health/db_backup.py --sync` without explicit user approval.** This is a full file-level copy that interrupts live FM writes. Always explain why, ask, and wait for YES. The restriction applies only to **manual** invocation of the full sync during market hours — the automated tiers below run safely on their own.
+
+### How sync actually works
+
+The query DB (`datalake_query.db`) is kept current by three tiers that run automatically:
+
+1. **Quick Sync** (`create_quick_sync` in `data/health/db_backup.py`, ~line 736). Runs after every Flow Monitor cycle during market hours — roughly every 10-15 minutes. Watermark approach: only copies new rows added since the query DB's latest timestamp. Default tables: `flow_alerts`, `flow_options_scans`, `flow_watchlist_daily`. Safe to run alongside live FM writes because it uses separate connections + WAL mode; transient "database is locked" errors self-heal on 5/15/30s retry. **Result: core Flow Monitor tables are never more than ~15 min behind production, even during market hours.**
+
+2. **Pre-market targeted sync** (`sync_pre_market_updates` in `db_backup.py`, ~line 1781). Runs pre-open. UPDATEs specific columns on existing rows that the quick sync's `INSERT OR IGNORE` can't reach: `flow_alerts.{next_day_oi, oi_resolution, oi_change_contracts, oi_change_pct, resolved_at}` and `flow_watchlist_daily.{alert_sentiment, building_alerts_count, closing_alerts_count}`.
+
+3. **Full sync** (`db_backup.py --sync`). Runs automatically as Phase 4.1 of the daily pipeline (`run_database_backup` in `main_runners.py`, ~line 2284). File-level copy; propagates everything NOT covered by quick sync (`earnings_events`, `earnings_moves`, `earnings_upcoming`, `earnings_snapshots`, `historical_prices`, `option_contracts`, `symbol_*`, etc.). This is the sync that the manual-invocation restriction above protects — during market hours it would interrupt live writes. The daily pipeline runs it at a safe time (post-close).
+
+In normal operation the query DB is kept current automatically. Lag only appears if the daily pipeline did not run that day or if a write landed after that day's Phase 4.1 sync. See `autofix/reference/AUTOFIX_CHEAT_SHEET.md` section "Database Sync Architecture Context" for deeper detail on WAL checkpoint behavior and PRAGMA reasoning.
 
 ---
 
@@ -57,6 +69,7 @@ python tools/trade_ingest.py --manual --symbol ERIC --action buy \
 # Symbol Lifecycle (see tools/lifecycle/README.md)
 python tools/symbol_lifecycle.py --add ACME       # Onboard
 python tools/symbol_lifecycle.py --offboard ACME  # Purgatory
+python tools/symbol_lifecycle.py --rename PSTG P  # Rename ticker across all DBs
 python tools/symbol_lifecycle.py --list           # Universe dashboard
 
 # Database query

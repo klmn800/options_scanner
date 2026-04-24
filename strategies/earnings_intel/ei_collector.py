@@ -474,6 +474,16 @@ class EarningsCollector:
             'conflicts': 0,        # Existing symbols where sources disagree (logged only)
         }
 
+        # Load confirmed symbols — skip these entirely (date locked by human or agent)
+        confirmed_symbols = set()
+        try:
+            conn = self._get_connection()
+            for row in conn.execute("SELECT symbol FROM earnings_upcoming WHERE date_confirmed = 1"):
+                confirmed_symbols.add(row[0])
+            conn.close()
+        except Exception:
+            pass
+
         total = len(self.stock_symbols)
         found_count = 0
         no_data_count = 0
@@ -482,6 +492,9 @@ class EarningsCollector:
         now_ts = eastern_isoformat()
 
         for i, symbol in enumerate(self.stock_symbols, 1):
+            if symbol in confirmed_symbols:
+                source_counts['confirmed_skip'] = source_counts.get('confirmed_skip', 0) + 1
+                continue
             yf_data = {'date': None, 'eps_estimate': None, 'revenue_estimate': None}
             fh_date = None
             fh_timing = 'Unknown'
@@ -801,9 +814,10 @@ if __name__ == '__main__':
         print("  Timing: {} bmo | {} amc | {} dmh | {} unknown".format(
             tb['bmo'], tb['amc'], tb['dmh'], tb['unknown']))
         dsc = result.get('date_source_counts', {})
-        print("  Sources: {} yf_new | {} fh_fallback | {} yf_updated | {} preserved | {} conflicts".format(
+        print("  Sources: {} yf_new | {} fh_fallback | {} yf_updated | {} preserved | {} conflicts | {} confirmed_skip".format(
             dsc.get('yfinance_new', 0), dsc.get('finnhub_fallback', 0),
-            dsc.get('yfinance_updated', 0), dsc.get('preserved', 0), dsc.get('conflicts', 0)))
+            dsc.get('yfinance_updated', 0), dsc.get('preserved', 0), dsc.get('conflicts', 0),
+            dsc.get('confirmed_skip', 0)))
     except Exception as e:
         print("FATAL: {}".format(e))
         traceback.print_exc()

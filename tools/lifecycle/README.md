@@ -10,6 +10,7 @@ CLI tool and package for managing the KLMN symbol universe: onboarding, offboard
 python tools/symbol_lifecycle.py --add ACME       # Onboard new symbol
 python tools/symbol_lifecycle.py --offboard ACME  # Move to purgatory
 python tools/symbol_lifecycle.py --restore ACME   # Restore from purgatory
+python tools/symbol_lifecycle.py --rename PSTG P  # Rename ticker across all DBs
 python tools/symbol_lifecycle.py --list           # Universe dashboard
 python tools/symbol_lifecycle.py --review         # Review pending suspects
 ```
@@ -50,6 +51,20 @@ Shows tier counts, protected groups, ETF count, pending suspects, recent 30-day 
 
 Interactive review of symbols flagged by the Phase 6.2 health check (missing from `option_contracts` for 5+ consecutive trading days). Actions: offboard, dismiss, skip.
 
+## Rename (`--rename`)
+
+Renames a ticker symbol across the entire database ecosystem when a company changes its NYSE/NASDAQ ticker (e.g., PSTG -> P after Pure Storage rebranded to Everpure).
+
+**Auto-discovers** all tables with a `symbol` column — new tables are picked up automatically without code changes. Also updates known alias columns (`primary_symbol`, `peer_symbol`).
+
+Databases updated:
+- `datalake.db` — all tables (symbol_metadata, flow_alerts, earnings_moves, etc.)
+- `performance.db` — any performance tracking tables referencing the symbol
+- `datalake_query.db` — query mirror
+- Sector archive — the symbol's archive DB (looked up from `symbol_metadata.archive_db`)
+
+Warns if the new ticker already exists in `symbol_metadata` (possible collision with a different company).
+
 ## Health Check (Phase 6.2)
 
 Runs automatically in the orchestrator after performance data collection. Detects symbols missing from `option_contracts`:
@@ -73,6 +88,7 @@ tools/lifecycle/
   __init__.py
   onboarding.py              # --add flow
   offboarding.py             # --offboard, --restore, --list, --review
+  renaming.py                # --rename (cross-database ticker rename)
   routing.py                 # Archive DB suggestion from sector/industry
   preflight.py               # Pre-flight checks
   audit.py                   # symbol_lifecycle_events table + logging

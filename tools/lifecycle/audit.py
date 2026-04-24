@@ -67,7 +67,7 @@ def log_lifecycle_event(db_path, symbol, event_type, tier, reason, operator, met
         symbol: Stock ticker
         event_type: One of: onboarded, offboarded, purgatory_added,
                     purgatory_restored, suspect_detected, suspect_classified,
-                    rename_from, rename_to
+                    renamed
         tier: Current tier at time of event (fm_universe, daily_only, purgatory, removed)
         reason: Free-form reason text
         operator: Who triggered this (human, autofix, collector, health_check)

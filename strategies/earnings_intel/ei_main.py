@@ -5,8 +5,8 @@ Earnings Intelligence Main Orchestrator (ei_main.py)
 Orchestrator for the Earnings Intelligence daily pipeline.
 
 Operational Modes:
-1. --daily-pipeline: Unified 6-sub-step pipeline (6:35 AM pre-market, Step 1.2)
-   Snapshots, post-calc, expected moves, watchlist, news enrichment, arbitrage scan
+1. --daily-pipeline: Unified 8-sub-step pipeline (6:35 AM pre-market, Step 1.2)
+   Lite refresh, snapshots, archive, post-calc, expected moves, watchlist, news, arbitrage
 2. --morning-scan: Standalone arbitrage scanner (available but not scheduled)
 3. --all: Run daily pipeline (auto-detect mode)
 
@@ -60,13 +60,14 @@ def run_daily_pipeline():
     """Execute unified earnings intelligence pipeline
 
     Sub-steps:
-    1. Snapshot collection (IV/price for upcoming earnings)
-    2. Archive past earnings (earnings_upcoming → earnings_events)
-    3. Post-earnings calculation (for T-3 day events)
-    4. Expected moves update (for all upcoming events)
-    5. Watchlist population (earnings_watchlist table)
-    6. News enrichment (Alpha Vantage sentiment for new/T-1 symbols)
-    7. Arbitrage scan (sector sympathy opportunities)
+    1. Lite earnings refresh (near-term date verification + dispute flagging)
+    2. Snapshot collection (IV/price for upcoming earnings)
+    3. Archive past earnings (earnings_upcoming → earnings_events)
+    4. Post-earnings calculation (for T-3 day events)
+    5. Expected moves update (for all upcoming events)
+    6. Watchlist population (earnings_watchlist table)
+    7. News enrichment (Alpha Vantage sentiment for new/T-1 symbols)
+    8. Arbitrage scan (sector sympathy opportunities)
 
     Returns:
         dict: Structured result with success, sub_tasks, alert_details, and summary metrics
@@ -86,6 +87,7 @@ def run_daily_pipeline():
     diag_logger.info("[{}] Daily Pipeline Started".format(now.strftime('%Y-%m-%d %H:%M:%S')))
 
     # Initialize metrics
+    lite_refresh_results = {'symbols_checked': 0, 'dates_updated': 0, 'disputes_flagged': 0}
     snapshot_results = {'snapshots_created': 0, 'events_processed': 0, 'errors': 0}
     archive_results = {'archived': 0}
     calc_results = {'moves_calculated': 0, 'events_ready': 0, 'errors': 0}
@@ -94,6 +96,7 @@ def run_daily_pipeline():
     news_results = {'news_enriched': 0, 'news_skipped': 0, 'budget_exhausted': False}
     arb_results = {'opportunities_found': 0, 'earnings_today': 0, 'high_quality': 0,
                    'medium_quality': 0, 'low_quality': 0, 'persisted': 0}
+    lite_refresh_success = True
     watchlist_success = False
     news_success = True
     arb_success = True
@@ -109,10 +112,38 @@ def run_daily_pipeline():
         from strategies.earnings_intel.ei_post_earnings_calc import PostEarningsCalculator
         from strategies.earnings_intel.ei_watchlist import populate_watchlist
         from strategies.earnings_intel.ei_arbitrage_scanner import ArbitrageScanner
+        from strategies.earnings_intel.ei_lite_refresh import run_lite_refresh
 
-        # Sub-step 1: Snapshot collection
+        # Sub-step 1: Lite earnings refresh (near-term date verification)
         print("")
-        beautiful_log("Snapshot Collection (1/6)", 'info')
+        beautiful_log("Lite Earnings Refresh (1/8)", 'info')
+        beautiful_log("Verifying near-term earnings dates against yfinance + Finnhub", 'info')
+        logging.info("   ├─ Scope: unconfirmed symbols within 21 days")
+        logging.info("   └─ Flags disputes for earnings researcher agent")
+        lite_refresh_start = time.time()
+        try:
+            db_path = os.path.join(project_root, 'data', 'datalake.db')
+            perf_db_path = os.path.join(project_root, 'data', 'performance.db')
+            lite_refresh_results = run_lite_refresh(
+                db_path=db_path, perf_db_path=perf_db_path)
+            lite_refresh_success = lite_refresh_results.get('success', False)
+            health_reporter.track_task_result(
+                'Lite Earnings Refresh',
+                lite_refresh_success,
+                symbols_checked=lite_refresh_results.get('symbols_checked', 0),
+                dates_updated=lite_refresh_results.get('dates_updated', 0),
+                disputes_flagged=lite_refresh_results.get('disputes_flagged', 0),
+                duration=time.time() - lite_refresh_start
+            )
+        except Exception as e:
+            logging.warning("   └─ Lite refresh failed: {}".format(e))
+            lite_refresh_success = False
+            health_reporter.track_task_result('Lite Earnings Refresh', False, error=str(e))
+        lite_refresh_time = time.time() - lite_refresh_start
+
+        # Sub-step 2: Snapshot collection
+        print("")
+        beautiful_log("Snapshot Collection (2/8)", 'info')
         beautiful_log("Collecting end-of-day snapshots for upcoming earnings", 'info')
         logging.info("   ├─ Window: T-7 to T+5 around earnings date")
         logging.info("   └─ Sources: historical_prices (OHLC) + option_symbol_summary (IV)")
@@ -136,9 +167,9 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Snapshot Collection', False, error=str(e))
         snapshot_time = time.time() - snapshot_start
 
-        # Sub-step 2: Archive past earnings (earnings_upcoming → earnings_events)
+        # Sub-step 3: Archive past earnings (earnings_upcoming → earnings_events)
         print("")
-        beautiful_log("Archive Past Earnings (2/7)", 'info')
+        beautiful_log("Archive Past Earnings (3/8)", 'info')
         beautiful_log("Moving past-date earnings to events archive", 'info')
         logging.info("   ├─ Source: earnings_upcoming WHERE earnings_date < today")
         logging.info("   └─ Target: earnings_events (INSERT OR IGNORE, preserves signals)")
@@ -184,9 +215,9 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Archive Past Earnings', False, error=str(e))
         archive_time = time.time() - archive_start
 
-        # Sub-step 3: Post-earnings calculation
+        # Sub-step 4: Post-earnings calculation
         print("")
-        beautiful_log("Post-Earnings Calculation (3/7)", 'info')
+        beautiful_log("Post-Earnings Calculation (4/8)", 'info')
         beautiful_log("Calculating price moves and IV crush for T+3 events", 'info')
         logging.info("   ├─ Sources: earnings_snapshots → historical_prices fallback")
         calc_start = time.time()
@@ -209,9 +240,9 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Post-Earnings Calculation', False, error=str(e))
         calc_time = time.time() - calc_start
 
-        # Sub-step 4: Expected moves update (check if exists first)
+        # Sub-step 5: Expected moves update (check if exists first)
         print("")
-        beautiful_log("Expected Moves Update (4/7)", 'info')
+        beautiful_log("Expected Moves Update (5/8)", 'info')
         beautiful_log("Recalculating signals with latest IV data", 'info')
         logging.info("   ├─ Methods: ATM straddle (primary) + IV-based (fallback)")
         logging.info("   └─ Universe: all symbols with earnings_date >= today")
@@ -238,9 +269,9 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Expected Moves Update', True, skipped=True)
         moves_time = time.time() - moves_start
 
-        # Sub-step 5: Watchlist population
+        # Sub-step 6: Watchlist population
         print("")
-        beautiful_log("Watchlist Population (5/7)", 'info')
+        beautiful_log("Watchlist Population (6/8)", 'info')
         beautiful_log("Filtering to actionable earnings plays", 'info')
         logging.info("   ├─ Entry: signal >= WATCH, <=14 days, OI >= 4,000")
         logging.info("   └─ Lifecycle: UPCOMING → TODAY → T+1 → T+2 → T+3 → delete T+4")
@@ -268,9 +299,9 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Watchlist Population', False, error=str(e))
         watchlist_time = time.time() - watchlist_start
 
-        # Sub-step 6: News enrichment (depends on sub-step 5)
+        # Sub-step 7: News enrichment (depends on sub-step 6)
         print("")
-        beautiful_log("News Enrichment (6/7)", 'info')
+        beautiful_log("News Enrichment (7/8)", 'info')
         beautiful_log("Adding news sentiment scores to earnings watchlist", 'info')
         logging.info("   ├─ Retrieving articles and sentiment scores from Alpha Vantage")
         logging.info("   ├─ Targets: new watchlist entries + T-1 symbols")
@@ -287,7 +318,6 @@ def run_daily_pipeline():
                 logging.info("   No watchlist entries to enrich — skipping")
                 news_success = True
             else:
-                import sqlite3
                 from tools.news_sentiment import get_budget_status, enrich_watchlist_symbol, create_av_client
                 from tools.decimal_formatter import clean_database_row
 
@@ -455,7 +485,7 @@ def run_daily_pipeline():
             health_reporter.track_task_result('News Enrichment', False, error=str(e))
         news_time = time.time() - news_start
 
-        # Sub-step 7: Arbitrage scan (independent of other sub-steps)
+        # Sub-step 8: Arbitrage scan (independent of other sub-steps)
         # Scans for sector sympathy IV plays: when a stock reports earnings,
         # its industry peers often see correlated moves. The scanner finds peers
         # with cheap IV relative to the primary's buildup, scores them by
@@ -463,7 +493,7 @@ def run_daily_pipeline():
         # Currently in development — needs historical data to accumulate in
         # earnings_sector_effects before the correlation component adds value.
         print("")
-        beautiful_log("Arbitrage Scan (7/7)", 'info')
+        beautiful_log("Arbitrage Scan (8/8)", 'info')
         beautiful_log("Scanning for sector sympathy IV opportunities", 'info')
         logging.info("   ├─ Finds peers with cheap IV when a stock reports earnings")
         logging.info("   └─ Status: in development — accumulating historical correlation data")
@@ -507,9 +537,9 @@ def run_daily_pipeline():
         # itself didn't crash, even if individual sub-steps failed)
         all_success = True
         total_time = time.time() - mode_start
-        sub_successes = [snapshot_success, archive_success, calc_success,
-                         moves_success, watchlist_success, news_success,
-                         arb_success]
+        sub_successes = [lite_refresh_success, snapshot_success, archive_success,
+                         calc_success, moves_success, watchlist_success,
+                         news_success, arb_success]
         tasks_successful = sum(sub_successes)
         total_errors = (snapshot_results.get('errors', 0) +
                         calc_results.get('errors', 0) +
@@ -519,6 +549,10 @@ def run_daily_pipeline():
         log_diagnostic_summary(
             diag_logger,
             'daily-pipeline',
+            lite_refresh_checked=lite_refresh_results.get('symbols_checked', 0),
+            lite_refresh_updated=lite_refresh_results.get('dates_updated', 0),
+            lite_refresh_disputes=lite_refresh_results.get('disputes_flagged', 0),
+            lite_refresh_time=lite_refresh_time,
             snapshots_created=snapshot_results.get('snapshots_created', 0),
             events_processed=snapshot_results.get('events_processed', 0),
             snapshot_time=snapshot_time,
@@ -538,7 +572,7 @@ def run_daily_pipeline():
             arb_time=arb_time,
             total_time=total_time,
             tasks_successful=tasks_successful,
-            total_sub_steps=7
+            total_sub_steps=8
         )
 
         # Generate health report
@@ -551,6 +585,13 @@ def run_daily_pipeline():
             'errors': total_errors,
             'failed_symbols': [],
             'sub_tasks': {
+                'lite_refresh': {
+                    'success': lite_refresh_success,
+                    'duration_seconds': lite_refresh_time,
+                    'symbols_checked': lite_refresh_results.get('symbols_checked', 0),
+                    'dates_updated': lite_refresh_results.get('dates_updated', 0),
+                    'disputes_flagged': lite_refresh_results.get('disputes_flagged', 0),
+                },
                 'snapshots': {
                     'success': snapshot_success,
                     'duration_seconds': snapshot_time,
@@ -927,7 +968,14 @@ def log_diagnostic_summary(diag_logger, mode, **metrics):
         now = now_eastern().strftime('%Y-%m-%d %H:%M:%S')
 
         if mode == 'daily-pipeline':
-            # Daily pipeline summary (7 sub-steps)
+            # Daily pipeline summary (8 sub-steps)
+            diag_logger.info("[{}] Lite Refresh: {} checked | {} updated | {} disputes | {:.1f}s".format(
+                now,
+                metrics.get('lite_refresh_checked', 0),
+                metrics.get('lite_refresh_updated', 0),
+                metrics.get('lite_refresh_disputes', 0),
+                metrics.get('lite_refresh_time', 0)
+            ))
             diag_logger.info("[{}] Snapshots: {} created | {} events processed | {:.1f}s".format(
                 now,
                 metrics.get('snapshots_created', 0),
@@ -966,7 +1014,7 @@ def log_diagnostic_summary(diag_logger, mode, **metrics):
                 metrics.get('arb_opportunities', 0),
                 metrics.get('arb_time', 0)
             ))
-            total_sub = metrics.get('total_sub_steps', 6)
+            total_sub = metrics.get('total_sub_steps', 8)
             diag_logger.info("[{}] Daily Pipeline Complete | Total: {:.1f}s | Success: {}/{}".format(
                 now,
                 metrics.get('total_time', 0),
