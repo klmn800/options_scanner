@@ -465,6 +465,22 @@ def main():
     # Validate after
     validate(db_path)
 
+    # SA Proposal 016 Part B: refresh derived columns on earnings_events.
+    # Anything that recomputes earnings_moves can shift the historical_avg
+    # baseline for downstream events. Run unscoped — this script can touch
+    # arbitrary symbols.
+    if not args.dry_run:
+        try:
+            sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+            from tools.backfill_earnings_events_derived import run as refresh_derived
+            print()
+            print("Refreshing earnings_events derived columns (SA P016 Part B)...")
+            result = refresh_derived(db_path=db_path, apply=True, quiet=True)
+            print("  events scanned: {}, signal-label changes: {}, applied: {}".format(
+                result['total'], result['signal_changed'], result['applied']))
+        except Exception as e:
+            logging.warning("Derived-column refresh hook failed: {}".format(e))
+
 
 if __name__ == "__main__":
     main()

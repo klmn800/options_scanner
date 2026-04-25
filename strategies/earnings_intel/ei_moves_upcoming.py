@@ -117,7 +117,7 @@ def calculate_earnings_days_ahead(earnings_date, current_date=None):
         logging.debug("Date calculation error for {}: {}".format(earnings_date, e))
         return None
 
-def get_historical_avg_move(symbol, db_path, recent_quarters=6):
+def get_historical_avg_move(symbol, db_path, recent_quarters=6, as_of_date=None):
     """Get historical average move percentages from earnings_moves table.
 
     Calculates both the all-time average and the recent-N-quarter average of
@@ -128,6 +128,10 @@ def get_historical_avg_move(symbol, db_path, recent_quarters=6):
         symbol: Stock ticker symbol
         db_path: Path to database
         recent_quarters: Number of recent quarters to average (default: 6)
+        as_of_date: If set (YYYY-MM-DD), only include earnings_moves rows with
+            earnings_date < as_of_date. Used by backfills to compute "what hist
+            would have been just before this earnings event" (i.e., excluding
+            the event's own row, which now exists in earnings_moves).
 
     Returns:
         dict: {'recent': float, 'alltime': float, 'quarters_used': int}
@@ -137,6 +141,10 @@ def get_historical_avg_move(symbol, db_path, recent_quarters=6):
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
 
+            as_of_clause = " AND earnings_date < ?" if as_of_date else ""
+            alltime_params = (symbol, as_of_date) if as_of_date else (symbol,)
+            recent_params = (symbol, as_of_date, recent_quarters) if as_of_date else (symbol, recent_quarters)
+
             # All-time average
             cursor.execute("""
                 SELECT AVG(ABS(move_1day_pct)) as avg_move_pct,
@@ -144,7 +152,7 @@ def get_historical_avg_move(symbol, db_path, recent_quarters=6):
                 FROM earnings_moves
                 WHERE symbol = ?
                 AND move_1day_pct IS NOT NULL
-            """, (symbol,))
+            """ + as_of_clause, alltime_params)
 
             alltime_row = cursor.fetchone()
             if not alltime_row or alltime_row[1] == 0:
@@ -162,10 +170,11 @@ def get_historical_avg_move(symbol, db_path, recent_quarters=6):
                     WHERE symbol = ?
                     AND move_1day_pct IS NOT NULL
                     AND earnings_date IS NOT NULL
+            """ + as_of_clause + """
                     ORDER BY earnings_date DESC
                     LIMIT ?
                 )
-            """, (symbol, recent_quarters))
+            """, recent_params)
 
             recent_row = cursor.fetchone()
             recent_avg = recent_row[0] if recent_row and recent_row[1] > 0 else alltime_avg

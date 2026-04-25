@@ -42,6 +42,60 @@ from decimal_formatter import clean_database_row
 from log_utils import beautiful_log
 
 
+def compute_move_vs_historical(actual_abs, hist_pct):
+    """Compute (move_vs_historical_pct, signal_accuracy) given actuals + hist baseline.
+
+    Pure helper extracted from EarningsPostCalculator._update_event_outcome so that
+    backfills (e.g. tools/backfill_earnings_events_derived.py) can reuse the exact
+    production logic instead of re-implementing thresholds and risking drift.
+
+    Args:
+        actual_abs: abs(move_1day_pct), or None
+        hist_pct: historical_avg_move_pct, or None/0
+
+    Returns:
+        tuple (move_vs_historical_pct, signal_accuracy). Both None if inputs incomplete.
+    """
+    if actual_abs is None or not hist_pct or hist_pct <= 0:
+        return (None, None)
+    move_vs_historical = (actual_abs / hist_pct) * 100
+    if move_vs_historical >= 100:
+        signal_accuracy = 'CONFIRMED'
+    elif move_vs_historical >= 80:
+        signal_accuracy = 'CLOSE'
+    elif move_vs_historical >= 60:
+        signal_accuracy = 'OVER'
+    else:
+        signal_accuracy = 'WAY OFF'
+    return (move_vs_historical, signal_accuracy)
+
+
+def compute_straddle_outcome(actual_abs, straddle_pct):
+    """Compute (move_vs_straddle_pct, straddle_outcome) given actuals + straddle baseline.
+
+    Pure helper paired with compute_move_vs_historical. Straddle outcome is a trade
+    outcome (PROFIT/FLAT/LOSS) — separate from signal_accuracy (CONFIRMED/CLOSE/OVER/WAY OFF)
+    which is a signal-quality metric.
+
+    Args:
+        actual_abs: abs(move_1day_pct), or None
+        straddle_pct: straddle_expected_move_pct, or None/0
+
+    Returns:
+        tuple (move_vs_straddle_pct, straddle_outcome). Both None if inputs incomplete.
+    """
+    if actual_abs is None or not straddle_pct or straddle_pct <= 0:
+        return (None, None)
+    move_vs_straddle = (actual_abs / straddle_pct) * 100
+    if move_vs_straddle >= 110:
+        straddle_outcome = 'PROFIT'
+    elif move_vs_straddle >= 95:
+        straddle_outcome = 'FLAT'
+    else:
+        straddle_outcome = 'LOSS'
+    return (move_vs_straddle, straddle_outcome)
+
+
 def _migrate_earnings_moves_schema(db_path):
     """Add new columns to earnings_moves if they don't exist (idempotent).
 
@@ -157,6 +211,12 @@ class PostEarningsCalculator:
             'errors': 0
         }
 
+        # Symbols whose earnings_moves rows were touched this run.
+        # SA Proposal 016 Part B: refresh derived columns on earnings_events
+        # for these symbols at end of run so historical_avg_move_pct cascade
+        # stays in sync with the new earnings_moves data.
+        self.touched_symbols = set()
+
         logging.debug("Post-earnings calculator initialized")
 
     def recalculate_all(self, trade_date=None):
@@ -257,6 +317,24 @@ class PostEarningsCalculator:
                     self._calculate_event_metrics(cursor, event)
 
                 conn.commit()
+
+                # Step 4 (SA Proposal 016 Part B): refresh derived columns on
+                # earnings_events for any symbol whose earnings_moves was just
+                # written. Adding/recomputing a row shifts the recent-6Q hist
+                # baseline for that symbol's other (later-dated) events, so
+                # cascade columns (relative_underpricing_pct, earnings_play_signal,
+                # move_vs_historical_pct, signal_accuracy) need a refresh.
+                if self.touched_symbols:
+                    try:
+                        from tools.backfill_earnings_events_derived import run as refresh_derived
+                        refresh_derived(
+                            db_path=self.db_path,
+                            symbols=sorted(self.touched_symbols),
+                            apply=True,
+                            quiet=True,
+                        )
+                    except Exception as e:
+                        logging.warning("Derived-column refresh hook failed: {}".format(e))
 
                 return self.stats
 
@@ -396,6 +474,7 @@ class PostEarningsCalculator:
 
             self._insert_earnings_move(cursor, moves_record)
             self.stats['moves_calculated'] += 1
+            self.touched_symbols.add(symbol)
 
             # Step 6: Calculate sector effects for peers
             # Pass iv_data so sector effects can access primary_iv_buildup_pct correctly
@@ -971,33 +1050,11 @@ class PostEarningsCalculator:
 
             actual_abs = abs(moves_record['move_1day_pct']) if moves_record.get('move_1day_pct') is not None else None
 
-            # Trade outcome: actual vs straddle
-            move_vs_straddle = None
-            straddle_outcome = None
             straddle_pct = event_row['straddle_expected_move_pct'] if event_row else None
-            if actual_abs is not None and straddle_pct and straddle_pct > 0:
-                move_vs_straddle = (actual_abs / straddle_pct) * 100
-                if move_vs_straddle >= 110:
-                    straddle_outcome = 'PROFIT'
-                elif move_vs_straddle >= 95:
-                    straddle_outcome = 'FLAT'
-                else:
-                    straddle_outcome = 'LOSS'
+            move_vs_straddle, straddle_outcome = compute_straddle_outcome(actual_abs, straddle_pct)
 
-            # Signal accuracy: actual vs our historical avg prediction
-            move_vs_historical = None
-            signal_accuracy = None
             hist_pct = event_row['historical_avg_move_pct'] if event_row else None
-            if actual_abs is not None and hist_pct and hist_pct > 0:
-                move_vs_historical = (actual_abs / hist_pct) * 100
-                if move_vs_historical >= 100:
-                    signal_accuracy = 'CONFIRMED'
-                elif move_vs_historical >= 80:
-                    signal_accuracy = 'CLOSE'
-                elif move_vs_historical >= 60:
-                    signal_accuracy = 'OVER'
-                else:
-                    signal_accuracy = 'WAY OFF'
+            move_vs_historical, signal_accuracy = compute_move_vs_historical(actual_abs, hist_pct)
 
             cursor.execute("""
                 UPDATE earnings_events
