@@ -929,31 +929,83 @@ class PostEarningsCalculator:
         move_1day_pct — different from the DTE-based expected_move_pct
         in earnings_upcoming.
 
+        Lookup falls back from production DB → sector archive when production
+        has no qualifying IV row. This matters because option_symbol_summary
+        is Tier 2 (30-day MOVE) of the sector archive system: rows older than
+        ~30 days are moved out of datalake.db into per-sector archive files.
+        Without the archive fallback, expected_move_pct would be NULL for
+        every event older than the rolling window — even though the IV
+        history exists, just elsewhere.
+
         Args:
-            cursor: Database cursor
+            cursor: Database cursor (against production datalake.db)
             symbol: Stock symbol
             earnings_date: Earnings date string (YYYY-MM-DD)
 
         Returns:
             float: Expected 1-day move percentage, or None
         """
-        # Get IV on the last trading day before earnings
+        iv_before = self._get_iv_before_earnings(cursor, symbol, earnings_date)
+        if iv_before is None:
+            return None
+
+        # 1-day expected move: IV * sqrt(1/365) * 100
+        return iv_before * math.sqrt(1.0 / 365.0) * 100
+
+    def _get_iv_before_earnings(self, cursor, symbol, earnings_date):
+        """Find iv_front_month on the last trading day before earnings.
+
+        Tries production DB first (~30-day rolling window), then the symbol's
+        sector archive (~9 months back, depending on when the symbol joined).
+
+        Args:
+            cursor: Cursor against production datalake.db (used for the
+                first query and to look up the archive_db assignment)
+            symbol: Stock ticker
+            earnings_date: YYYY-MM-DD
+
+        Returns:
+            float iv (decimal, e.g. 0.85 for 85%), or None
+        """
+        # Try production first (rolling 30-day window covers recent events)
         cursor.execute("""
             SELECT iv_front_month FROM option_symbol_summary
             WHERE symbol = ? AND trade_date < ?
             AND iv_front_month IS NOT NULL AND iv_front_month > 0
             ORDER BY trade_date DESC LIMIT 1
         """, (symbol, earnings_date))
-
         row = cursor.fetchone()
-        if not row or not row['iv_front_month']:
+        if row and row['iv_front_month']:
+            return row['iv_front_month']
+
+        # Fallback to sector archive
+        cursor.execute("SELECT archive_db FROM symbol_metadata WHERE symbol = ?", (symbol,))
+        meta = cursor.fetchone()
+        if not meta or not meta['archive_db']:
             return None
 
-        iv_before = row['iv_front_month']
+        archive_path = os.path.join(
+            os.path.dirname(self.db_path), 'sector_archive', '{}.db'.format(meta['archive_db']))
+        if not os.path.exists(archive_path):
+            return None
 
-        # 1-day expected move: IV * sqrt(1/365) * 100
-        expected_move_pct = iv_before * math.sqrt(1.0 / 365.0) * 100
-        return expected_move_pct
+        try:
+            with sqlite3.connect(archive_path, timeout=30) as arc_conn:
+                arc_conn.row_factory = sqlite3.Row
+                arc_cur = arc_conn.cursor()
+                arc_cur.execute("""
+                    SELECT iv_front_month FROM option_symbol_summary
+                    WHERE symbol = ? AND trade_date < ?
+                    AND iv_front_month IS NOT NULL AND iv_front_month > 0
+                    ORDER BY trade_date DESC LIMIT 1
+                """, (symbol, earnings_date))
+                arc_row = arc_cur.fetchone()
+                if arc_row and arc_row['iv_front_month']:
+                    return arc_row['iv_front_month']
+        except sqlite3.Error as e:
+            logging.debug("Archive IV lookup failed for {} ({}): {}".format(
+                symbol, archive_path, e))
+        return None
 
     def _insert_earnings_move(self, cursor, moves_record):
         """Insert earnings move record
