@@ -165,6 +165,11 @@ def _migrate_earnings_events_outcome_columns(db_path):
         ('move_vs_historical_pct', 'REAL'),
         ('straddle_outcome', 'TEXT'),
         ('signal_accuracy', 'TEXT'),
+        # SA Proposal 015: peak-exit outcome (mirrors *_pct/*outcome above
+        # but uses actual_max_move_pct instead of actual_move_1day_pct).
+        # Enables native peak-exit signal calibration.
+        ('move_vs_straddle_max_pct', 'REAL'),
+        ('straddle_outcome_max', 'TEXT'),
     ]
 
     try:
@@ -1031,9 +1036,10 @@ class PostEarningsCalculator:
         """Write denormalized outcome summary back to earnings_events.
 
         Provides at-a-glance historical view without JOINing earnings_moves.
-        Computes two comparison metrics:
-          - move_vs_straddle_pct: abs(actual) / straddle * 100 (trade outcome)
-          - move_vs_historical_pct: abs(actual) / historical_avg * 100 (signal accuracy)
+        Computes three comparison metrics:
+          - move_vs_straddle_pct: abs(actual_1day) / straddle * 100 (close-exit trade outcome)
+          - move_vs_straddle_max_pct: abs(actual_max) / straddle * 100 (peak-exit outcome, SA P015)
+          - move_vs_historical_pct: abs(actual_1day) / historical_avg * 100 (signal accuracy)
 
         Args:
             cursor: Database cursor
@@ -1049,9 +1055,11 @@ class PostEarningsCalculator:
             event_row = cursor.fetchone()
 
             actual_abs = abs(moves_record['move_1day_pct']) if moves_record.get('move_1day_pct') is not None else None
+            actual_max_abs = abs(moves_record['max_intraday_move_pct']) if moves_record.get('max_intraday_move_pct') is not None else None
 
             straddle_pct = event_row['straddle_expected_move_pct'] if event_row else None
             move_vs_straddle, straddle_outcome = compute_straddle_outcome(actual_abs, straddle_pct)
+            move_vs_straddle_max, straddle_outcome_max = compute_straddle_outcome(actual_max_abs, straddle_pct)
 
             hist_pct = event_row['historical_avg_move_pct'] if event_row else None
             move_vs_historical, signal_accuracy = compute_move_vs_historical(actual_abs, hist_pct)
@@ -1063,8 +1071,10 @@ class PostEarningsCalculator:
                     move_vs_expected_pct = ?,
                     iv_collapse_pct = ?,
                     move_vs_straddle_pct = ?,
+                    move_vs_straddle_max_pct = ?,
                     move_vs_historical_pct = ?,
                     straddle_outcome = ?,
+                    straddle_outcome_max = ?,
                     signal_accuracy = ?,
                     outcome_updated_at = ?
                 WHERE event_id = ?
@@ -1074,8 +1084,10 @@ class PostEarningsCalculator:
                 moves_record.get('move_vs_expected_pct'),
                 moves_record.get('iv_collapse_pct'),
                 move_vs_straddle,
+                move_vs_straddle_max,
                 move_vs_historical,
                 straddle_outcome,
+                straddle_outcome_max,
                 signal_accuracy,
                 moves_record.get('calculated_at'),
                 event_id
