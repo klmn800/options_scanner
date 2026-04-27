@@ -78,12 +78,24 @@ SYNC_TABLE_CONFIG = {
 
     # Trade tracking
     'trade_executions': ('created_at', 'REPLACE'),
+    # trade_positions: row REMOVED at net_qty=0 — INSERT-only quick-sync cannot
+    # propagate that delete. Closed positions linger in query DB until next full
+    # sync. Phase 2c refresh helper will mirror deletes to query DB explicitly.
+    'trade_positions': ('last_action_at', 'REPLACE'),
+    # trade_calls: created_at watermark catches NEW proposed calls (TA logs them
+    # via tools/log_trade_call.py and needs them visible in query DB promptly).
+    # Status flips on EXISTING rows (proposed→open, open→closed) won't propagate
+    # via this watermark — Phase 2c refresh helper mirrors those UPDATEs directly
+    # to query DB. Manual edits (e.g., abandon) ride next full sync.
+    'trade_calls': ('created_at', 'REPLACE'),
 }
 
 # Default tables for --quick-sync without --table argument
 # market_daily_summary included so intraday regime updates reach the query DB each cycle
-# trade_executions included so new fills are visible in query DB promptly
-DEFAULT_QUICK_SYNC_TABLES = ['flow_alerts', 'flow_options_scans', 'flow_watchlist_daily', 'market_daily_summary', 'trade_executions']
+# trade_executions + trade_positions + trade_calls included so new fills, current
+# portfolio state, and new trade calls are visible in query DB promptly (per-turn
+# TA hook and dashboard views read from query DB)
+DEFAULT_QUICK_SYNC_TABLES = ['flow_alerts', 'flow_options_scans', 'flow_watchlist_daily', 'market_daily_summary', 'trade_executions', 'trade_positions', 'trade_calls']
 
 def get_timestamp():
     """Get formatted timestamp for logging"""

@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.join(project_root, 'tools'))
 from timezone_utils import now_eastern
 from decimal_formatter import clean_database_row
 from log_utils import beautiful_log
+from trade_positions import refresh_trade_positions
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +407,15 @@ def _insert_execution(conn, execution):
         conn.commit()
 
         if cursor.rowcount > 0:
+            # Materialize the position update + auto-link to any matching
+            # proposed trade_call. Failures here don't roll back the execution
+            # row — that's the source of truth; trade_positions can be rebuilt
+            # via `python tools/trade_positions.py --reconcile` if drift occurs.
+            try:
+                refresh_trade_positions(conn, position_key=cleaned.get('position_key'))
+            except Exception as refresh_err:
+                logger.warning("refresh_trade_positions failed for {}: {}".format(
+                    cleaned.get('position_key'), refresh_err))
             return 'inserted'
         return 'duplicate'
 
