@@ -1040,7 +1040,7 @@ class FMAlerts:
                 with open(self.config.config_path, 'r') as f:
                     full_config = json.load(f)
 
-                from fm_social_notifier import FMSocialNotifier
+                from strategies.flow_monitor.fm_social_notifier import FMSocialNotifier
                 self._social_notifier = FMSocialNotifier(full_config, self.storage)
 
             # Get the alert ID from database (just saved)
