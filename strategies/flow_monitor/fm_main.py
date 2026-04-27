@@ -1378,8 +1378,13 @@ def run_pre_market():
         'symbols_updated': sentiment_stats.get('symbols_updated', 0),
     }
 
-def run_market_hours():
+def run_market_hours(early_start=False):
     """Execute market hours monitoring (no wait for 9:30 - main.py handles timing)
+
+    Args:
+        early_start: If True, run a pre-open scan as cycle 1 (bypasses market-open check
+            when called before 9:30 AM ET), then waits until 9:30 AM before continuing
+            with normal cycles. Captures pre-market option values just before market opens.
 
     Returns:
         dict: {'success': bool, 'total_cycles': int, 'news_enrichment': dict, 'session_stats': dict}
@@ -1417,7 +1422,7 @@ def run_market_hours():
             "Real-time monitoring to detect large relative changes in option activity.",
             "Runs continuous cycles identified by scan_timestamp.",
             "Cycles are intended to be quick (< 30 min) to identify bursts of activity.",
-            "Runs continuously from 9:30 AM to 4:00 PM ET.",
+            "Pre-open scan at 9:15 AM (cycle 1), then continuous from 9:30 AM to 4:00 PM ET." if early_start else "Runs continuously from 9:30 AM to 4:00 PM ET.",
             "",
             "Universe: KLMN 800 with {} symbols.".format(len(symbols)),
             "",
@@ -1469,22 +1474,34 @@ def run_market_hours():
 
     cycle = 1
     closing_scan_done = False
+    pre_open_scan_done = False
     last_cycle_start_time = None
 
     # Market hours monitoring loop
     while not shutdown_event.is_set():
+        is_pre_open_cycle = False  # Reset each iteration
+
         if not collector.is_market_open():
-            if closing_scan_done:
+            now_check = now_eastern()
+            is_before_open = (now_check.hour < 9) or (now_check.hour == 9 and now_check.minute < 30)
+
+            if early_start and is_before_open and not pre_open_scan_done:
+                # Pre-open scan: capture option values just before market opens at 9:30
+                beautiful_log("Pre-open scan — capturing pre-market values before 9:30 AM open", 'info')
+                pre_open_scan_done = True
+                is_pre_open_cycle = True
+            elif closing_scan_done:
                 beautiful_log("Closing scan complete. Ending market hours pipeline.", 'warning')
                 break
-            # Check if the last cycle already captured near-close data
-            if last_cycle_start_time and last_cycle_start_time.hour == 15 and last_cycle_start_time.minute >= 55:
+            elif last_cycle_start_time and last_cycle_start_time.hour == 15 and last_cycle_start_time.minute >= 55:
+                # Last cycle already captured near-close data
                 beautiful_log("Market closed. Last cycle started at {} — close enough for EOD data.".format(
                     last_cycle_start_time.strftime('%H:%M:%S')), 'warning')
                 break
-            # Market just closed — run one final scan to capture end-of-day positioning
-            beautiful_log("Market closed — running closing scan to capture EOD activity", 'info')
-            closing_scan_done = True
+            else:
+                # Market just closed — run one final scan to capture end-of-day positioning
+                beautiful_log("Market closed — running closing scan to capture EOD activity", 'info')
+                closing_scan_done = True
 
         cycle_start = time.time()
         current_time = now_eastern()
@@ -1514,7 +1531,7 @@ def run_market_hours():
         try:
             # Collection phase
             collection_start = time.time()
-            scan_timestamp = collector.run_once(symbols, closing_scan=closing_scan_done)
+            scan_timestamp = collector.run_once(symbols, closing_scan=closing_scan_done, pre_open_scan=is_pre_open_cycle)
             collection_elapsed = time.time() - collection_start
             storage_elapsed = getattr(collector, 'last_storage_elapsed', 0.0)
 
@@ -1891,9 +1908,29 @@ def run_market_hours():
             logging.info("   Slowest cycle: {:.1f}s".format(max(stats.cycle_times)))
             logging.info("   Fastest cycle: {:.1f}s".format(min(stats.cycle_times)))
 
-        # 60-second interruptible sleep with context-aware message
-        coffee_context = 'sync_complete' if sync_success else 'default'
-        coffee_break(60, context=coffee_context)
+        # After pre-open cycle, wait until 9:30 AM market open (instead of 60s coffee break)
+        if is_pre_open_cycle:
+            now = now_eastern()
+            target = now.replace(hour=9, minute=30, second=0, microsecond=0)
+            wait_seconds = int((target - now).total_seconds())
+            if wait_seconds > 0:
+                beautiful_log("Pre-open scan complete — waiting until 9:30 AM market open ({:.1f} min)".format(
+                    wait_seconds / 60), 'info')
+                # Interruptible sleep — check shutdown every 5 seconds
+                for _ in range(wait_seconds // 5):
+                    if shutdown_event.is_set():
+                        break
+                    time.sleep(5)
+                remaining = wait_seconds % 5
+                if remaining > 0 and not shutdown_event.is_set():
+                    time.sleep(remaining)
+            else:
+                # Already past 9:30 — short coffee break
+                coffee_break(60, context='default')
+        else:
+            # 60-second interruptible sleep with context-aware message
+            coffee_context = 'sync_complete' if sync_success else 'default'
+            coffee_break(60, context=coffee_context)
 
         cycle += 1
 

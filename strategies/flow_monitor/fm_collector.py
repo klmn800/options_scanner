@@ -138,22 +138,29 @@ class FMCollector:
             
             return market_open <= now <= market_close
     
-    def run_once(self, symbols, closing_scan=False):
+    def run_once(self, symbols, closing_scan=False, pre_open_scan=False):
         """Run single collection cycle
 
         Args:
             symbols: List of symbols to collect
             closing_scan: If True, bypass is_market_open() check (used for EOD closing scan)
+            pre_open_scan: If True, bypass is_market_open() check (used for 9:15 AM pre-open snapshot)
         """
 
         # Generate scan timestamp ONCE for this entire collection run
         scan_timestamp = eastern_isoformat()
 
-        beautiful_log("Starting FM Collector{}".format(" (closing scan)" if closing_scan else ""), 'info')
+        if closing_scan:
+            label = " (closing scan)"
+        elif pre_open_scan:
+            label = " (pre-open scan)"
+        else:
+            label = ""
+        beautiful_log("Starting FM Collector{}".format(label), 'info')
         beautiful_log("Scan timestamp: {}".format(scan_timestamp), 'info')
 
-        # Check market hours (skip for closing scan — caller already validated)
-        if not closing_scan:
+        # Check market hours (skip for closing/pre-open scans — caller already validated timing)
+        if not closing_scan and not pre_open_scan:
             if self.is_market_open():
                 logging.debug("Market is OPEN")
             else:

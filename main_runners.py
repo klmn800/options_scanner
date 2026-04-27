@@ -408,7 +408,7 @@ class OrchestratorRunnersMixin:
             [
                 "Mission: Complete daily options flow monitoring cycle",
                 "Pre-Market: System preparation and setup",
-                "Market Hours: Real-time flow monitoring (9:30 AM - 4:00 PM)",
+                "Market Hours: Pre-open scan at 9:15, real-time flow 9:30 AM - 4:00 PM",
                 "Post-Market (4:30 PM):",
                 "  1. Historical backfill    3. Symbol rollup",
                 "  2. Market regime summary  4. Evaluation + cleanup"
@@ -489,19 +489,20 @@ class OrchestratorRunnersMixin:
 
             # Market hours: Only run if not after market close
             if not is_after_market:
-                # Wait until exactly 9:30 AM if before market open
+                # Wait until exactly 9:15 AM (pre-open scan starts 15 min early to capture
+                # pre-market values; cycle 1 runs at 9:15, then waits until 9:30 for cycle 2)
                 print("")
                 print("")
                 now = now_eastern()
-                if now.hour < 9 or (now.hour == 9 and now.minute < 30):
-                    target = now.replace(hour=9, minute=30, second=0, microsecond=0)
+                if now.hour < 9 or (now.hour == 9 and now.minute < 15):
+                    target = now.replace(hour=9, minute=15, second=0, microsecond=0)
                     wait_seconds = (target - now).total_seconds()
                     if wait_seconds > 0:
-                        self.beautiful_log("Waiting until 9:30 AM for market open collector/analyzer ({:.1f} minutes)".format(wait_seconds / 60), 'info')
+                        self.beautiful_log("Waiting until 9:15 AM for pre-open scan ({:.1f} minutes)".format(wait_seconds / 60), 'info')
                         time.sleep(wait_seconds)
 
                 self.beautiful_log("Running market hours monitoring (collector/analyzer/alerts)", 'phase')
-                market_hours_result = run_market_hours()  # Runs until market closes at 4:00 PM
+                market_hours_result = run_market_hours(early_start=True)  # Runs until market closes at 4:00 PM
 
                 # Unpack result (dict with success/stats, or bool for backwards compat)
                 if isinstance(market_hours_result, dict):
@@ -917,13 +918,9 @@ class OrchestratorRunnersMixin:
             if return_code == 0:
                 self.beautiful_log("Morning Views completed successfully", 'success')
 
-                # Launch TUI in a new window if not already running
-                tui_status = self._launch_morning_view_tui()
-
                 self.create_status_box("✅ MORNING VIEWS COMPLETE", [
                     "Watchlist: Generated from today's OI data",
                     "Email: Process completed (check email delivery)",
-                    "TUI: {}".format(tui_status),
                     "Status: ✅ Morning views finished"
                 ])
                 return {'success': True, 'duration_seconds': mv_duration, 'stdout': captured_output}

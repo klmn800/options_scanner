@@ -11,8 +11,8 @@ Clean Architecture:
            - Metadata Collection Pipeline
            - Query Database Sync (morning data + metadata)
            - Morning Views (emailed watchlist)
-  9:15 AM  - Flow Monitor Pre-Market (system preparation)
-  9:30 AM  - Flow Monitor Market Hours (real-time monitoring)
+  9:15 AM  - Flow Monitor Market Hours starts — Cycle 1 pre-open scan (captures pre-market values)
+  9:30 AM  - Flow Monitor Cycle 2+ — real-time monitoring through 4:00 PM
   4:00 PM  - Flow Monitor Market Close
   4:30 PM  - Flow Monitor Post-Market Analysis (backfill, regime, rollup, evaluation)
            - Evening Option Pipeline (volume-enriched data)
