@@ -58,7 +58,6 @@ def _create_table(cursor):
             earnings_play_signal TEXT,
             iv_percentile_30d REAL,
             relative_underpricing_pct REAL,
-            expected_move_pct REAL,
             historical_avg_move_pct REAL,
             straddle_expected_move_pct REAL,
             oi_balance_text TEXT,
@@ -170,7 +169,7 @@ def _get_qualifying_symbols(cursor, today):
     # 1. New qualifying symbols from earnings_upcoming + OI >= 4000
     cursor.execute("""
         SELECT eu.symbol, eu.earnings_date, eu.earnings_time, eu.earnings_play_signal,
-               eu.relative_underpricing_pct, eu.expected_move_pct,
+               eu.relative_underpricing_pct,
                eu.historical_avg_move_pct, eu.straddle_expected_move_pct
         FROM earnings_upcoming eu
         INNER JOIN (
@@ -192,9 +191,8 @@ def _get_qualifying_symbols(cursor, today):
             "earnings_time": row[2],
             "earnings_play_signal": row[3],
             "relative_underpricing_pct": row[4],
-            "expected_move_pct": row[5],
-            "historical_avg_move_pct": row[6],
-            "straddle_expected_move_pct": row[7],
+            "historical_avg_move_pct": row[5],
+            "straddle_expected_move_pct": row[6],
         }
 
     # 2. Existing watchlist symbols — stay until T+4 regardless of signal
@@ -206,7 +204,7 @@ def _get_qualifying_symbols(cursor, today):
         # Refresh from earnings_upcoming if available
         cursor.execute("""
             SELECT earnings_date, earnings_time, earnings_play_signal,
-                   relative_underpricing_pct, expected_move_pct,
+                   relative_underpricing_pct,
                    historical_avg_move_pct, straddle_expected_move_pct
             FROM earnings_upcoming WHERE symbol = ?
         """, (sym,))
@@ -218,9 +216,8 @@ def _get_qualifying_symbols(cursor, today):
                 "earnings_time": eu_row[1],
                 "earnings_play_signal": eu_row[2],
                 "relative_underpricing_pct": eu_row[3],
-                "expected_move_pct": eu_row[4],
-                "historical_avg_move_pct": eu_row[5],
-                "straddle_expected_move_pct": eu_row[6],
+                "historical_avg_move_pct": eu_row[4],
+                "straddle_expected_move_pct": eu_row[5],
             }
         else:
             # earnings_upcoming row may have been archived — use watchlist's stored date
@@ -230,7 +227,6 @@ def _get_qualifying_symbols(cursor, today):
                 "earnings_time": None,
                 "earnings_play_signal": None,
                 "relative_underpricing_pct": None,
-                "expected_move_pct": None,
                 "historical_avg_move_pct": None,
                 "straddle_expected_move_pct": None,
             }
@@ -598,7 +594,6 @@ def populate_watchlist(db_path=None):
                 "earnings_play_signal": q.get("earnings_play_signal"),
                 "iv_percentile_30d": opt.get("iv_percentile_30d"),
                 "relative_underpricing_pct": q.get("relative_underpricing_pct"),
-                "expected_move_pct": q.get("expected_move_pct"),
                 "historical_avg_move_pct": q.get("historical_avg_move_pct"),
                 "straddle_expected_move_pct": q.get("straddle_expected_move_pct"),
                 "oi_balance_text": opt.get("oi_balance_text"),
@@ -624,12 +619,12 @@ def populate_watchlist(db_path=None):
                     INSERT INTO earnings_watchlist (
                         symbol, status, current_price, days_to_earnings, earnings_date,
                         earnings_time, earnings_play_signal, iv_percentile_30d,
-                        relative_underpricing_pct, expected_move_pct, historical_avg_move_pct,
+                        relative_underpricing_pct, historical_avg_move_pct,
                         straddle_expected_move_pct, oi_balance_text, vol_balance_text,
                         iv_front_month_change_5d, alert_count_5d,
                         news_sentiment_label, news_sentiment_score, news_article_count,
                         first_appeared_date, created_at, last_updated
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     -- ON CONFLICT: deliberately omits 4 enrichment columns
                     -- (alert_count_5d, news_sentiment_*).
                     -- By excluding them from UPDATE SET, yesterday's enrichment
@@ -645,7 +640,6 @@ def populate_watchlist(db_path=None):
                         earnings_play_signal = excluded.earnings_play_signal,
                         iv_percentile_30d = COALESCE(excluded.iv_percentile_30d, earnings_watchlist.iv_percentile_30d),
                         relative_underpricing_pct = excluded.relative_underpricing_pct,
-                        expected_move_pct = excluded.expected_move_pct,
                         historical_avg_move_pct = excluded.historical_avg_move_pct,
                         straddle_expected_move_pct = excluded.straddle_expected_move_pct,
                         oi_balance_text = excluded.oi_balance_text,
@@ -657,7 +651,7 @@ def populate_watchlist(db_path=None):
                     cleaned["days_to_earnings"], cleaned["earnings_date"],
                     cleaned.get("earnings_time"), cleaned.get("earnings_play_signal"),
                     cleaned.get("iv_percentile_30d"), cleaned.get("relative_underpricing_pct"),
-                    cleaned.get("expected_move_pct"), cleaned.get("historical_avg_move_pct"),
+                    cleaned.get("historical_avg_move_pct"),
                     cleaned.get("straddle_expected_move_pct"), cleaned.get("oi_balance_text"),
                     cleaned.get("vol_balance_text"),
                     cleaned.get("iv_front_month_change_5d"),

@@ -220,7 +220,7 @@ def _batch_insert_events(db_path, records):
 
     # Ensure signal columns exist (idempotent migration from ei_collector.py)
     existing = {row[1] for row in cursor.execute("PRAGMA table_info(earnings_events)")}
-    for col in ['earnings_play_signal', 'relative_underpricing_pct', 'expected_move_pct',
+    for col in ['earnings_play_signal', 'relative_underpricing_pct',
                 'straddle_expected_move_pct', 'historical_avg_move_pct',
                 'historical_avg_move_alltime_pct', 'historical_quarters_used',
                 'eps_estimate', 'revenue_estimate']:

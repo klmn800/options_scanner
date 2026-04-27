@@ -1476,7 +1476,7 @@ class OrchestratorRunnersMixin:
                 SELECT earnings_play_signal,
                        COUNT(*) as total,
                        SUM(CASE WHEN ABS(actual_move_1day_pct) >=
-                           COALESCE(straddle_expected_move_pct, expected_move_pct, 999)
+                           COALESCE(straddle_expected_move_pct, 999)
                            THEN 1 ELSE 0 END) as beat
                 FROM earnings_events
                 WHERE earnings_date >= ?

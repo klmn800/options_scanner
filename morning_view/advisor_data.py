@@ -63,7 +63,7 @@ SCHEMA_DOCS = {
     EARNINGS CALENDAR SCHEMA:
     - earnings_date: Date of earnings report
     - earnings_days_ahead: Days until earnings
-    - expected_move_pct: Implied move from options pricing
+    - straddle_expected_move_pct: Implied move from ATM straddle pricing
     - historical_avg_move_pct: Average historical earnings move
     - move_difference_pct: Gap between expected and historical
     - earnings_time: Before market open (BMO) or After close (AMC)
@@ -290,7 +290,7 @@ def gather_risk_data(symbol: str) -> Dict:
     # Get earnings timing
     cursor.execute("""
         SELECT earnings_date, earnings_days_ahead,
-               expected_move_pct, historical_avg_move_pct,
+               straddle_expected_move_pct, historical_avg_move_pct,
                move_difference_pct, earnings_time,
                earnings_play_signal
         FROM earnings_upcoming
@@ -377,9 +377,9 @@ def gather_catalyst_data(symbol: str) -> Dict:
     # Get earnings info
     cursor.execute("""
         SELECT earnings_date, earnings_days_ahead,
-               expected_move_pct, historical_avg_move_pct,
+               straddle_expected_move_pct, historical_avg_move_pct,
                move_difference_pct, earnings_time,
-               earnings_play_signal, straddle_expected_move_pct
+               earnings_play_signal
         FROM earnings_upcoming
         WHERE symbol = ?
     """, (symbol,))

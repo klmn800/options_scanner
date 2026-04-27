@@ -289,7 +289,7 @@ class Advisor:
                 e = additional['earnings_info']
                 prompt_parts.append(f"\n### Earnings:")
                 prompt_parts.append(f"  Date: {e['earnings_date']} ({e['earnings_days_ahead']} days ahead)")
-                prompt_parts.append(f"  Expected Move: {e['expected_move_pct']:.1f}%")
+                prompt_parts.append(f"  Expected Move: {e['straddle_expected_move_pct']:.1f}%")
                 prompt_parts.append(f"  Historical Avg: {e['historical_avg_move_pct']:.1f}%")
                 prompt_parts.append(f"  Signal: {e['earnings_play_signal']}")
 

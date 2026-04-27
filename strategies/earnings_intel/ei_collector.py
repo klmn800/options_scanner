@@ -71,11 +71,10 @@ def _setup_diagnostic_logger():
     return logger
 
 
-# 9 signal columns preserved during archive
+# 8 signal columns preserved during archive
 SIGNAL_COLUMNS = [
     'earnings_play_signal',
     'relative_underpricing_pct',
-    'expected_move_pct',
     'straddle_expected_move_pct',
     'historical_avg_move_pct',
     'historical_avg_move_alltime_pct',
@@ -278,14 +277,14 @@ class EarningsCollector:
                     (symbol, earnings_date, fiscal_year, fiscal_quarter,
                      estimated_eps, actual_eps, earnings_time, source, is_backfilled,
                      earnings_play_signal, relative_underpricing_pct,
-                     expected_move_pct, straddle_expected_move_pct,
+                     straddle_expected_move_pct,
                      historical_avg_move_pct, historical_avg_move_alltime_pct,
                      historical_quarters_used, eps_estimate, revenue_estimate)
                 SELECT
                     symbol, earnings_date, NULL, NULL,
                     NULL, NULL, earnings_time, 'earnings_upcoming', 0,
                     earnings_play_signal, relative_underpricing_pct,
-                    expected_move_pct, straddle_expected_move_pct,
+                    straddle_expected_move_pct,
                     historical_avg_move_pct, historical_avg_move_alltime_pct,
                     historical_quarters_used, eps_estimate, revenue_estimate
                 FROM earnings_upcoming

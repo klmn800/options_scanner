@@ -12,7 +12,8 @@ Calculates:
    - Uses iv_front_month (consistently populated vs iv_30dte which has NULLs)
 3. Expected Move: IV-based 1-day expected move at time of earnings
    - NOTE: This is the 1-day expected move for comparison with move_1day_pct.
-     Different from expected_move_pct in earnings_upcoming which uses DTE.
+     Different from straddle_expected_move_pct in earnings_upcoming, which is
+     the multi-day expected move computed from the front-month ATM straddle.
 4. Move vs Expected: abs(actual_1day_move) / expected_move * 100
    - >100 = moved MORE than expected, <100 = moved LESS
 5. Sector Effects: correlation, IV arbitrage, expected moves for peers
@@ -926,7 +927,7 @@ class PostEarningsCalculator:
 
         Uses pre-earnings IV (day before) to compute the theoretical 1-day
         expected move. This is the 1-day expected move for comparison with
-        move_1day_pct — different from the DTE-based expected_move_pct
+        move_1day_pct — different from the multi-day straddle_expected_move_pct
         in earnings_upcoming.
 
         Lookup falls back from production DB → sector archive when production

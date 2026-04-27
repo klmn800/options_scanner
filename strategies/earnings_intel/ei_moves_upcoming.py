@@ -190,61 +190,6 @@ def get_historical_avg_move(symbol, db_path, recent_quarters=6, as_of_date=None)
         logging.debug("Historical move lookup error for {}: {}".format(symbol, e))
         return None
 
-def get_expected_move_from_iv(symbol, earnings_days_ahead, db_path):
-    """
-    Calculate expected move from current IV (FALLBACK method).
-    Expected Move = IV × √(Days to Earnings / 365) × 100
-
-    Uses iv_front_month from option_symbol_summary, which is only populated for ~43%
-    of symbols (strict DTE bucketing). This is the secondary method — the straddle method
-    (get_straddle_expected_move) is preferred and has better coverage for near-term earnings.
-
-    Coverage note (audited 2026-02-24): iv_front_month is NULL for ~57% of symbols, but
-    this does NOT cause a real coverage gap. In the actionable 0-30 day window, between
-    this method and the straddle method, 96-100% of symbols have expected move data.
-    The gaps are only in the 31-90 day horizon where earnings aren't actionable anyway.
-    iv_30dte (99.9% populated) could be used as a fallback but isn't worth the change
-    since distant earnings aren't traded.
-
-    Args:
-        symbol: Stock symbol
-        earnings_days_ahead: Number of days until earnings
-        db_path: Path to database
-    """
-    try:
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-
-            # Get latest IV data and current price
-            cursor.execute("""
-                SELECT
-                    oss.iv_front_month,
-                    hp.close_price
-                FROM option_symbol_summary oss
-                JOIN historical_prices hp ON oss.symbol = hp.symbol
-                WHERE oss.symbol = ?
-                    AND oss.trade_date = (SELECT MAX(trade_date) FROM option_symbol_summary)
-                    AND hp.trade_date = (SELECT MAX(trade_date) FROM historical_prices WHERE symbol = ?)
-            """, (symbol, symbol))
-
-            result = cursor.fetchone()
-            if not result or not result[0] or not result[1]:
-                return None
-
-            iv_front_month, current_price = result
-
-            if iv_front_month > 0 and current_price > 0 and earnings_days_ahead > 0:
-                # Calculate expected move: IV × √(Days to Earnings / 365) × 100
-                # Note: IV should already be in decimal form (e.g., 0.25 for 25%)
-                expected_move_pct = iv_front_month * math.sqrt(earnings_days_ahead / 365.0) * 100
-                return expected_move_pct
-
-            return None
-
-    except Exception as e:
-        logging.debug("Expected move calculation error for {}: {}".format(symbol, e))
-        return None
-
 def get_open_interest_for_symbol(symbol, db_path):
     """Get latest total open interest for symbol"""
     try:
@@ -468,7 +413,7 @@ def process_symbol_earnings_upcoming(symbol, db_path, config, current_date=None)
 
             # Get current earnings_upcoming record
             cursor.execute("""
-                SELECT earnings_date, earnings_time, expected_move_pct,
+                SELECT earnings_date, earnings_time,
                        historical_avg_move_pct, move_difference_pct,
                        earnings_play_signal, earnings_alert, straddle_expected_move_pct
                 FROM earnings_upcoming
@@ -480,7 +425,7 @@ def process_symbol_earnings_upcoming(symbol, db_path, config, current_date=None)
                 logging.warning("No earnings_upcoming record found for {}".format(symbol))
                 return False
 
-            earnings_date, earnings_time, existing_expected_move, existing_historical_avg, \
+            earnings_date, earnings_time, existing_historical_avg, \
             existing_move_diff, existing_signal, existing_alert, existing_straddle_move = result
 
             if not earnings_date:
@@ -503,39 +448,28 @@ def process_symbol_earnings_upcoming(symbol, db_path, config, current_date=None)
                 historical_avg_move_alltime_pct = None
                 historical_quarters_used = 0
 
-            # Calculate expected move from IV (FALLBACK — ~43% coverage due to iv_front_month gaps)
-            expected_move_pct = get_expected_move_from_iv(symbol, earnings_days_ahead, db_path)
-
             # Calculate straddle-based expected move (PRIMARY METHOD — fills in as earnings approach)
             # Coverage: 96-100% within 30 days, lower for distant earnings (structural, not a bug)
             straddle_expected_move_pct = get_straddle_expected_move(symbol, earnings_date, db_path)
 
-            # Calculate move difference (historical - expected) — absolute metric, kept for backward compat
-            # Use STRADDLE method as primary, fallback to IV method
+            # Calculate move difference (historical - straddle expected) — absolute metric, kept for backward compat
             # Positive = underpriced (historical moves more than expected)
             # Negative = overpriced (historical moves less than expected)
             if straddle_expected_move_pct and historical_avg_move_pct:
                 move_difference_pct = historical_avg_move_pct - straddle_expected_move_pct
-            elif expected_move_pct and historical_avg_move_pct:
-                move_difference_pct = historical_avg_move_pct - expected_move_pct
             else:
                 move_difference_pct = existing_move_diff
 
             # Calculate relative underpricing — PRIMARY signal metric (added 2026-02-10, 6Q recency 2026-04-13)
             # Formula: (recent_6Q_avg - straddle_expected) / straddle_expected * 100
             # Answers: "By what % is the market underpricing this stock's recent earnings move pattern?"
-            # Straddle-only — no fallback to IV-based expected move (2026-04-15).
-            # expected_move_pct derives from iv_front_month, which can pick up pre-earnings
-            # expirations with artificially low IV (e.g. SSNC: 16.7% IV from Apr 17 expiry
-            # before Apr 23 earnings → 2.2% expected move → false STRONG BUY +116%).
-            # If straddle is unavailable (thin option chain), signal stays UNKNOWN.
-            # This affects ~5 symbols with <10 strikes — acceptable coverage loss.
+            # Straddle-only — IV-based fallback removed 2026-04-26 with column drop (SA Proposal 017).
+            # Earlier note: iv_front_month picked up pre-earnings expirations with artificially low IV
+            # (e.g. SSNC: 16.7% IV from Apr 17 expiry before Apr 23 earnings → 2.2% expected move →
+            # false STRONG BUY +116%). If straddle is unavailable (thin option chain), signal stays UNKNOWN.
             relative_underpricing_pct = None
             if straddle_expected_move_pct and historical_avg_move_pct and straddle_expected_move_pct > 0:
                 relative_underpricing_pct = ((historical_avg_move_pct - straddle_expected_move_pct) / straddle_expected_move_pct) * 100
-            # No fallback to expected_move_pct — it uses iv_front_month which can pick up
-            # pre-earnings expirations with artificially low IV, producing wildly wrong signals.
-            # If straddle is unavailable (thin option chain), signal stays UNKNOWN.
 
             # Determine earnings play signal from relative underpricing
             earnings_play_signal = determine_earnings_play_signal(relative_underpricing_pct, config)
@@ -549,7 +483,6 @@ def process_symbol_earnings_upcoming(symbol, db_path, config, current_date=None)
             # Prepare update data
             update_data = {
                 'earnings_days_ahead': earnings_days_ahead,
-                'expected_move_pct': expected_move_pct,
                 'straddle_expected_move_pct': straddle_expected_move_pct,
                 'historical_avg_move_pct': historical_avg_move_pct,
                 'historical_avg_move_alltime_pct': historical_avg_move_alltime_pct,
@@ -565,14 +498,11 @@ def process_symbol_earnings_upcoming(symbol, db_path, config, current_date=None)
             update_data = clean_database_row(update_data)
 
             # Update the record
-            # COALESCE for expected_move_pct and straddle_expected_move_pct:
-            # On earnings day, days_ahead=0 makes the IV formula return None,
-            # overwriting the valid value from the day before. COALESCE preserves
-            # the last good value when the new calculation returns NULL.
+            # COALESCE for straddle_expected_move_pct: when straddle calc returns None
+            # (thin option chain, etc.), preserve the last good value from the day before.
             cursor.execute("""
                 UPDATE earnings_upcoming
                 SET earnings_days_ahead = ?,
-                    expected_move_pct = COALESCE(?, expected_move_pct),
                     straddle_expected_move_pct = COALESCE(?, straddle_expected_move_pct),
                     historical_avg_move_pct = ?,
                     historical_avg_move_alltime_pct = ?,
@@ -585,7 +515,6 @@ def process_symbol_earnings_upcoming(symbol, db_path, config, current_date=None)
                 WHERE symbol = ?
             """, (
                 update_data['earnings_days_ahead'],
-                update_data['expected_move_pct'],
                 update_data['straddle_expected_move_pct'],
                 update_data['historical_avg_move_pct'],
                 update_data['historical_avg_move_alltime_pct'],
