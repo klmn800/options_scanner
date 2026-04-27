@@ -388,6 +388,148 @@ class SocialContentGenerator:
 
         return tags
 
+    def format_for_x(self, alert_data, max_chars=280):
+        """Format flow alert as a single X (Twitter) post (<= max_chars).
+
+        Reuses _enrich_alert() and _detect_multi_leg() from the Reddit pipeline
+        but produces plain-text output without markdown, emoji, or disclaimers
+        (those live in the account bio).
+
+        Format (single-leg):
+            $SYMBOL - unusual call activity
+
+            $32C 5/15/26 | 12,500 contracts (45x avg) | $2.5M premium
+            Tech / Large cap / Bull regime
+
+            2:14 PM ET
+
+        Format (multi-leg):
+            $SYMBOL - multi-leg activity
+
+            $2.5M strangle (1 put, 1 call) | exp 5/15/26
+            Tech / Large cap / Bull regime
+
+            2:14 PM ET
+
+        If the full message exceeds max_chars, the context line is dropped first,
+        then the time line. Returns None if even headline + detail won't fit.
+
+        Args:
+            alert_data: Alert dict from flow_alerts.
+            max_chars: Hard limit. Default 280 (X tweet limit).
+
+        Returns:
+            str <= max_chars, or None if it can't fit.
+        """
+        enriched = self._enrich_alert(alert_data)
+        multi_leg = self._detect_multi_leg(alert_data)
+
+        symbol = enriched.get('symbol', '?')
+        option_type = (enriched.get('option_type') or '').lower()
+
+        if multi_leg:
+            headline = f"${symbol} - multi-leg activity"
+            exp_short = self._fmt_exp(enriched.get('expiration_date'))
+            detail = multi_leg.get('description', '')
+            if exp_short:
+                detail = f"{detail} | exp {exp_short}"
+        else:
+            action = "call" if option_type == 'call' else "put"
+            headline = f"${symbol} - unusual {action} activity"
+
+            strike_str = self._fmt_strike(enriched.get('strike'))
+            opt_letter = 'C' if option_type == 'call' else 'P'
+            exp_short = self._fmt_exp(enriched.get('expiration_date'))
+            volume = enriched.get('volume') or 0
+            volume_surprise = enriched.get('volume_surprise_factor') or 0
+            premium = enriched.get('premium_value') or 0
+
+            vol_str = f"{volume:,} contracts"
+            if volume_surprise > 0:
+                vol_str += f" ({volume_surprise:.0f}x avg)"
+
+            detail = (
+                f"{strike_str}{opt_letter} {exp_short} | "
+                f"{vol_str} | "
+                f"{self._fmt_premium(premium)} premium"
+            )
+
+        context_parts = []
+        sector = enriched.get('sector')
+        if sector and sector != 'Unknown':
+            context_parts.append(sector)
+        market_cap = enriched.get('market_cap')
+        if market_cap and market_cap != 'Unknown':
+            cap_str = market_cap.replace('_', ' ').title()
+            if 'cap' not in cap_str.lower():
+                cap_str = f"{cap_str} cap"
+            context_parts.append(cap_str)
+        regime = enriched.get('regime')
+        if regime and regime != 'Unknown':
+            context_parts.append(f"{regime.replace('_', ' ').title()} regime")
+        context_line = " / ".join(context_parts) if context_parts else None
+
+        time_line = self._fmt_alert_time(enriched.get('alert_timestamp'))
+
+        def _build(include_context, include_time):
+            lines = [headline, "", detail]
+            if include_context and context_line:
+                lines.append(context_line)
+            if include_time and time_line:
+                lines.extend(["", time_line])
+            return "\n".join(lines)
+
+        for ctx, tm in [(True, True), (False, True), (True, False), (False, False)]:
+            tweet = _build(ctx, tm)
+            if len(tweet) <= max_chars:
+                return tweet
+
+        return None
+
+    @staticmethod
+    def _fmt_premium(value):
+        """Format premium as $X.XM, $XXXK, or $XX,XXX."""
+        if not value:
+            return "$0"
+        if value >= 1e6:
+            return f"${value/1e6:.1f}M"
+        if value >= 1e3:
+            return f"${value/1e3:.0f}K"
+        return f"${value:,.0f}"
+
+    @staticmethod
+    def _fmt_strike(value):
+        """Format strike as $X (drop trailing .0)."""
+        if value is None:
+            return "$?"
+        if float(value) == int(value):
+            return f"${int(value)}"
+        return f"${value:g}"
+
+    @staticmethod
+    def _fmt_exp(exp_date):
+        """Convert YYYY-MM-DD to M/D/YY (Windows-safe)."""
+        if not exp_date:
+            return ""
+        try:
+            dt = datetime.strptime(str(exp_date), '%Y-%m-%d')
+            return f"{dt.month}/{dt.day}/{str(dt.year)[2:]}"
+        except (ValueError, TypeError):
+            return str(exp_date)
+
+    @staticmethod
+    def _fmt_alert_time(timestamp):
+        """Format ISO timestamp as 'H:MM AM/PM ET' (Windows-safe)."""
+        if not timestamp:
+            return ""
+        try:
+            dt = datetime.fromisoformat(str(timestamp).replace(' ', 'T'))
+            hour = dt.hour % 12 or 12
+            ampm = 'AM' if dt.hour < 12 else 'PM'
+            return f"{hour}:{dt.minute:02d} {ampm} ET"
+        except (ValueError, TypeError):
+            return ""
+
 
 def main():
     """Test/demo function"""

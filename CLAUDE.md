@@ -81,6 +81,11 @@ python tools/direct_db_query.py --tables
 # News Sentiment
 python tools/news_sentiment.py --symbol NVDA
 python tools/news_sentiment.py --budget
+
+# Social Posting (The Print / @ThePrintFlow)
+python tools/twitter_post_alert.py --alert-id 12345           # post specific flow alert
+python tools/twitter_post_alert.py --latest --dry-run         # preview most recent eligible
+python tools/twitter_test_post.py                             # X API auth smoke test
 ```
 
 **Agents, email tools, analysis tools, archiving commands:** See `docs/CLAUDE_REFERENCE.md`.
@@ -98,6 +103,10 @@ For agent launch commands, key files, and proposal review workflow: `docs/CLAUDE
 **System Analyst handoff:** When you make a code change that affects the analyst's work (pipeline edits, schema changes, data quality fixes, bug fixes that close a proposal), drop a short markdown note in `agents/system_analyst/inbox/` named `YYYY-MM-DD_short-kebab-topic.md`. It reads these at session start and moves them to `inbox/processed/`. See `agents/system_analyst/inbox/README.md` for the full protocol.
 
 **System Analyst proposal feedback:** When you implement (or decline/defer) a proposal from `agents/system_analyst/proposals/`, write or update the corresponding feedback file at `agents/system_analyst/proposals/feedback/NNN_<proposal_name>.md`. The file must begin with a STATUS line: `STATUS: <STATE> YYYY-MM-DD — brief note` where STATE is one of: `IMPLEMENTED`, `APPROVED`, `DEFERRED`, `DECLINED`, `IN_REVIEW`. Full convention: `agents/system_analyst/proposals/feedback/README.md`.
+
+### The Print — X Auto-Publisher (`@ThePrintFlow`)
+
+Flow Monitor auto-posts qualifying alerts to X. Hooked from `fm_alerts.py` via `fm_social_notifier.check_alert(alert_id)` after each save. Filter: high v/oi (≥1.0), no rolls, no dupes, daily cap 30. Format: terse single-tweet via `social_content_generator.format_for_x()`. Toggles in `config.json` `social_posting.enabled` + `dry_run`. OAuth 1.0a creds in `credentials.json` `twitter_api`. Cost: $0.01/post (X pay-per-use). Ops doc: `docs/reference/SOCIAL_POSTING_QUICKSTART.md`.
 
 ---
 

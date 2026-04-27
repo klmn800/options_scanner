@@ -1,248 +1,134 @@
-# Social Posting Quick Start Guide
+# The Print — Social Posting Quick Start
 
-## What Was Built
+> **Account:** [@ThePrintFlow](https://x.com/ThePrintFlow) on X
+> **Status:** Live as of 2026-04-27 (auto-posting via Flow Monitor)
+> **Brainstorm / Phase 2-3 vision:** `docs/social_poster/BRAINSTORM.md`
 
-A complete automated social media posting system for sharing high-quality flow alerts on Reddit/Twitter.
+## What it does
 
-### ✅ Components Created
+Flow Monitor auto-posts qualifying `flow_alerts` rows to X (@ThePrintFlow) immediately on save. Each post is a single tweet with the alert's symbol, contract, volume context, and market regime.
 
-1. **Database Infrastructure**
-   - `social_posts` table for tracking drafts and published posts
-   - New columns in `flow_alerts` (social_posted, social_post_id)
-   - Migration script: `data/migrations/create_social_posts_table.py`
+## Eligibility filter (current MVP)
 
-2. **Core Modules**
-   - `tools/social_content_generator.py` - Generates enriched educational posts
-   - `tools/social_poster.py` - Posts to Reddit/Twitter with draft management
-   - `strategies/flow_monitor/fm_social_notifier.py` - Integration with Flow Monitor
+An alert posts iff ALL of:
+- `social_posted` is 0 / NULL (dedup)
+- `roll_detected` is 0 / NULL (no rolls)
+- `open_interest > 0` (no divide-by-zero)
+- `volume / open_interest >= min_voi_ratio` (default 1.0; closure-resistant)
+- daily post cap not reached (default 30/day, counts `social_posted=1` rows for today)
 
-3. **Configuration**
-   - Added `social_posting`, `reddit_api`, `twitter_api` sections to config.json
-   - Everything disabled by default (safe to deploy)
+## Tweet format (Option A — single tweet, terse)
 
-4. **Documentation**
-   - `docs/social-posting.md` - Complete system documentation
-   - This quick start guide
+Single-leg:
+```
+$PLTR - unusual call activity
 
-5. **Integration**
-   - Flow Monitor automatically queues high-quality alerts
-   - 30-minute delay for manual context addition
-   - Draft-first workflow (nothing posts automatically yet)
+$32C 5/15/26 | 12,500 contracts (45x avg) | $2.5M premium
+Tech / Large cap / Bull regime
 
-## Current Status: DISABLED (Safe)
-
-```json
-{
-  "social_posting": {
-    "enabled": false,  // ✅ Disabled
-    "auto_post": false  // ✅ Draft-only mode
-  }
-}
+2:14 PM ET
 ```
 
-**Nothing will post automatically.** The system is ready but inactive.
+Multi-leg (auto-detected via 5-min same-symbol window in `_detect_multi_leg()`):
+```
+$NVDA - multi-leg activity
 
-## How to Activate (When Ready)
+$132.8M call spread ($170-$185) | exp 5/15/26
+Tech / Mega cap / Bull regime
 
-### Step 1: Get Reddit API Credentials
-
-1. Go to https://www.reddit.com/prefs/apps
-2. Click "create app"
-3. Fill in:
-   - name: OptionsFlowBot
-   - type: script
-   - redirect: http://localhost:8080
-4. Save `client_id` and `client_secret`
-
-### Step 2: Update config.json
-
-```json
-{
-  "reddit_api": {
-    "client_id": "YOUR_CLIENT_ID",
-    "client_secret": "YOUR_CLIENT_SECRET",
-    "username": "YOUR_REDDIT_USERNAME",
-    "password": "YOUR_REDDIT_PASSWORD",
-    "user_agent": "OptionsFlowBot/1.0"
-  }
-}
+10:28 AM ET
 ```
 
-### Step 3: Test with Draft Mode
+Hard cap: 280 chars. If full message exceeds, the context line drops first, then the time line. Returns None (skip post) if even headline + detail won't fit.
 
-```bash
-# Enable social posting but keep auto_post = false
-# Edit config.json:
-"social_posting": {
+## Configuration
+
+`config.json` `social_posting`:
+```json
+{
   "enabled": true,
-  "auto_post": false  // Still draft-only
-}
-
-# Test with existing alert
-python tools/social_content_generator.py --alert-id 7650 --output test.txt
-
-# Generate draft (doesn't post)
-python tools/social_poster.py --alert-id 7650
-```
-
-### Step 4: Choose Posting Strategy
-
-**Option A: Manual Review (Recommended Initially)**
-```json
-{
-  "social_posting": {
-    "enabled": true,
-    "auto_post": false  // You approve each draft manually
+  "dry_run": false,
+  "selection_criteria": {
+    "min_voi_ratio": 1.0,
+    "exclude_rolls": true,
+    "max_posts_per_day": 30
   }
 }
 ```
 
-**Option B: Full Automation**
-```json
-{
-  "social_posting": {
-    "enabled": true,
-    "auto_post": true,  // Posts automatically after 30-min delay
-    "platforms": {
-      "reddit": {
-        "enabled": true,
-        "subreddits": ["u_YourUsername"]  // Start with profile posts
-      }
-    }
-  }
-}
-```
+- `enabled` — master kill switch. False = nothing happens, FM skips the entire path.
+- `dry_run` — true = log formatted tweet but don't post or write to DB. Use for testing in production without spamming X.
+- `min_voi_ratio` — `volume / open_interest` threshold. Higher = fewer posts but stronger "fresh institutional" signal.
+- `max_posts_per_day` — safety cap.
 
-## Testing Today's KDP Alert
-
-The system successfully detected and formatted today's KDP strangle:
-
-```
-🎯 Unusual Options Flow: $KDP - $19.9M strangle (1 put, 1 call)
-
-⏰ Detected: 12:11 PM ET (Live Detection)
-
-📊 The Flow:
-• Strategy: $19.9M strangle (1 put, 1 call)
-• Total Premium: $11.6M
-• Primary Leg: $25.0 PUT | Exp: 2025-11-21
-
-💡 Market Context:
-• Company: Keurig Dr Pepper Inc.
-• Sector: Consumer Defensive | Market Cap: Large_cap
-• Market Regime: Low Vol
-
-🎯 Why It Matters:
-Large volatility play suggesting expectation of significant price movement
-in either direction. With $19.9M in combined premium, this represents
-substantial institutional positioning ahead of a potential catalyst.
-```
-
-**Features Demonstrated:**
-- ✅ Multi-leg detection (found both put and call)
-- ✅ Market context enrichment (sector, regime)
-- ✅ Educational interpretation
-- ✅ Proper disclaimers
-
-## Command Reference
-
-### Generate Draft Content
+## CLI utilities
 
 ```bash
-# Basic draft
-python tools/social_content_generator.py --alert-id <ID>
+# Post one specific alert manually
+python tools/twitter_post_alert.py --alert-id 12345
 
-# With manual context
-python tools/social_content_generator.py --alert-id <ID> --context "Your analysis here"
+# Preview the most recent eligible alert (no post)
+python tools/twitter_post_alert.py --latest --dry-run
 
-# Save to file
-python tools/social_content_generator.py --alert-id <ID> --output draft.txt
+# Post the most recent eligible alert
+python tools/twitter_post_alert.py --latest
+
+# X API auth smoke test (posts a "disregard" tweet)
+python tools/twitter_test_post.py
+
+# Re-run notifier on a specific alert with safe override
+python strategies/flow_monitor/fm_social_notifier.py --alert-id 12345 --force-dry-run
 ```
 
-### Post to Social Media
+## How posting flows through code
 
-```bash
-# Create draft (if auto_post = false)
-python tools/social_poster.py --alert-id <ID>
+1. FM cycle saves a new alert to `flow_alerts` (`fm_alerts.py`)
+2. If `social_posting.enabled = true`, `_check_social_posting()` calls `fm_social_notifier.FMSocialNotifier.check_alert(alert_id)`
+3. Notifier loads alert, runs eligibility filter, checks daily cap
+4. If eligible: `social_content_generator.format_for_x(alert)` builds the tweet text
+5. tweepy.Client posts via X API v2 (cost: $0.01/post on pay-per-use)
+6. On success: `flow_alerts.social_posted = 1`, `social_post_id = <tweet_id>` written back to primary `data/datalake.db`
 
-# Create draft with context
-python tools/social_poster.py --alert-id <ID> --context "Your analysis"
+## Credentials
 
-# Publish existing draft
-python tools/social_poster.py --draft-id <DRAFT_ID>
-```
+OAuth 1.0a User Context, stored in `credentials.json` `twitter_api`:
+- `api_key`, `api_key_secret` (Consumer Key + Secret in X portal)
+- `access_token`, `access_token_secret` (regenerate AFTER setting App permissions to Read+Write)
+- `bearer_token` (saved but not used for posting — write needs OAuth 1.0a User Context)
 
-### Queue Management
+App type in X Developer Portal: **Web App, Automated App or Bot** (Confidential client).
 
-```bash
-# Check if alert qualifies
-python strategies/flow_monitor/fm_social_notifier.py --check-alert <ID>
+## Cost
 
-# Process delayed queue manually
-python strategies/flow_monitor/fm_social_notifier.py --process-queue
-```
+X API pay-per-use, **$0.01 per tweet posted**. Daily cap of 30/day = max ~$9/month. No fixed monthly fee. 2 million read cap doesn't apply (we're posting, not scraping).
 
-### Database Queries
+The previous Free tier was discontinued February 2026. Legacy Basic ($200/mo) and Pro ($5,000/mo) tiers are closed to new signups.
 
-```bash
-# View all drafts
-python tools/direct_db_query.py --sql "SELECT * FROM social_posts ORDER BY created_at DESC LIMIT 10"
+## Compliance
 
-# Check which alerts were posted
-python tools/direct_db_query.py --sql "SELECT id, symbol, significance_score, social_posted FROM flow_alerts WHERE social_posted = TRUE"
-```
+@ThePrintFlow displays X's "Automated" account label, linked to a separate human-owned account per X's automation policy. Disclaimer ("informational only, not investment advice") lives in the X bio, not in tweets.
 
-## Recommended First Steps
+## What's NOT here yet
 
-1. **Test Content Generation**: Use today's KDP alert (7650) to verify formatting
-2. **Get Reddit API Credentials**: Set up app at reddit.com/prefs/apps
-3. **Start with Profile Posts**: Use `"subreddits": ["u_YourUsername"]` initially
-4. **Build Post History**: Post 5-10 drafts to your profile over 1-2 weeks
-5. **Request Subreddit Access**: Message r/options mods with examples
-6. **Enable Automation**: Switch to auto_post after confidence builds
+- Threshold tuning based on production data — wait for ~2 weeks of posts, then query `flow_alerts.social_posted=1` and tune `min_voi_ratio` and daily cap.
+- Multi-leg strike trailing-zero polish (e.g., `$170.0` → `$170` in `_detect_multi_leg()` description).
+- Engagement / track-record stats page (Phase 2 of brainstorm).
+- Tiered access / paid tier (Phase 2-3 of brainstorm).
 
-## Quality Thresholds
+## Files
 
-Current settings (can be adjusted):
+| File | Purpose |
+|------|---------|
+| `tools/social_content_generator.py` | `format_for_x()` method + helpers (`_fmt_premium`, `_fmt_strike`, `_fmt_exp`, `_fmt_alert_time`). Reuses `_enrich_alert()` and `_detect_multi_leg()` from the older Reddit pipeline. |
+| `tools/twitter_post_alert.py` | Manual single-alert posting CLI. |
+| `tools/twitter_test_post.py` | Auth smoke test. |
+| `strategies/flow_monitor/fm_social_notifier.py` | FM hook. `check_alert()` is called per saved alert. |
+| `config.json` `social_posting` | Toggles + selection criteria. |
+| `credentials.json` `twitter_api` | OAuth credentials. |
 
-```json
-"selection_criteria": {
-  "min_significance_score": 7.0,      // Only exceptional alerts (v2 scoring, was 9.0)
-  "min_premium_value": 5000000,       // $5M+ premium
-  "max_posts_per_day": 3,             // Quality over quantity
-  "exclude_earnings_day": true        // Avoid earnings noise
-}
-```
+## Old code still on disk (not in active path)
 
-**Expected volume**: 1-2 posts per day (score > 9.0 is rare)
+- `tools/social_poster.py` — original Reddit + Twitter draft-review poster (Oct 2025). Never activated. Not imported by anything live.
+- `docs/reference/social-posting.md` — original design doc, marked DEPRECATED.
 
-## Safety Features
-
-1. **Rate Limiting**: Max 3 posts/day prevents spam
-2. **Deduplication**: Won't post same alert twice
-3. **Age Check**: Won't post alerts > 60 minutes old
-4. **Draft Mode**: Review before posting when auto_post = false
-5. **Error Handling**: Failed posts logged, won't crash Flow Monitor
-
-## Next Steps
-
-- [ ] Get Reddit API credentials
-- [ ] Test content generation with recent alerts
-- [ ] Review generated drafts for tone/accuracy
-- [ ] Start with manual posting to profile
-- [ ] Build 1-2 weeks of post history
-- [ ] Request r/options subreddit access
-- [ ] Enable auto_post after confidence builds
-
-## Support
-
-- Full docs: `docs/social-posting.md`
-- Flow Monitor integration: `strategies/flow_monitor/fm_social_notifier.py`
-- Content customization: `tools/social_content_generator.py`
-- Posting logic: `tools/social_poster.py`
-
----
-
-**Built:** 2025-10-06
-**Status:** Complete, tested, disabled by default
-**Ready to activate:** When you get Reddit API credentials
+These can be deleted in a future cleanup sweep.

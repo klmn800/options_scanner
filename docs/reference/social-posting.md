@@ -1,5 +1,9 @@
 # Social Media Posting System
 
+> **DEPRECATED 2026-04-27.** This document describes the original (Oct 2025) Reddit + Twitter draft-review design that was never activated. The system was redesigned and shipped as **The Print** on X (@ThePrintFlow) in April 2026 — see [SOCIAL_POSTING_QUICKSTART.md](SOCIAL_POSTING_QUICKSTART.md) for current docs. Code references below are stale; refer to source for current behavior.
+
+---
+
 Automated Reddit/Twitter posting for high-quality flow alerts to build credibility and audience before monetization.
 
 ## Overview

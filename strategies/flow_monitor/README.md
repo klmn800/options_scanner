@@ -76,7 +76,7 @@ Only backfill failure is critical. Everything else logs an error and continues.
 | `fm_performance_tracker.py` | Performance — tracks cycle timing, API response times |
 | `fm_baseline_generator.py` | Baselines — generates baseline metrics for alert scoring |
 | `fm_agent.py` | AI agent — optional Claude-powered alert narrative generation (`--run-agent`) |
-| `fm_social_notifier.py` | Social notifications — lazy-loaded by `fm_alerts.py` for external notifications |
+| `fm_social_notifier.py` | X auto-poster — `check_alert()` hook posts qualifying alerts to @ThePrintFlow on save |
 
 ### Evaluation Subsystem (`evaluation/`)
 
