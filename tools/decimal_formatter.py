@@ -152,7 +152,7 @@ def format_database_values(data_dict, column_types=None):
         # Earnings Intelligence System fields (text/timestamp fields)
         'move_direction', 'iv_crush_severity', 'arbitrage_quality', 'snapshot_type', 'straddle_outcome', 'signal_accuracy',
         'snapshot_date', 'is_primary_symbol', 'earnings_time', 'source', 'is_backfilled', 'note_type', 'sentiment', 'tags',
-        'notes', 'peer_type', 'calculated_at',
+        'notes', 'peer_type', 'calculated_at', 'event_id',
         # Roll detection fields
         'roll_counterpart_details',
         # Trade execution fields

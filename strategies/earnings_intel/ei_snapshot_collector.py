@@ -327,6 +327,22 @@ class SnapshotCollector:
             days_from_earnings: Days from earnings (negative = before, positive = after)
             is_primary: True if primary symbol, False if peer
         """
+        # event_id lookup (Proposal 020 Part B). Pre-earnings snapshots leave this
+        # NULL because the event hasn't been archived in earnings_events yet —
+        # the one-time backfill SQL fills those once the event lands. Post-earnings
+        # snapshots get the canonical join key written immediately.
+        event_id = None
+        if days_from_earnings >= 0:
+            cursor.execute("""
+                SELECT event_id FROM earnings_events
+                WHERE symbol = ? AND ABS(JULIANDAY(earnings_date) - JULIANDAY(?)) <= 3
+                ORDER BY ABS(JULIANDAY(earnings_date) - JULIANDAY(?)) ASC
+                LIMIT 1
+            """, (symbol, earnings_date, earnings_date))
+            ev_row = cursor.fetchone()
+            if ev_row:
+                event_id = ev_row['event_id']
+
         # OHLC + stock volume from historical_prices
         cursor.execute("""
             SELECT open_price, high_price, low_price, close_price, volume
@@ -371,6 +387,7 @@ class SnapshotCollector:
         snapshot_record = {
             'symbol': symbol,
             'earnings_date': earnings_date,
+            'event_id': event_id,
             'snapshot_date': data_date,
             'days_from_earnings': days_from_earnings,
             'snapshot_type': snapshot_type,
@@ -396,18 +413,19 @@ class SnapshotCollector:
         # (e.g. backfill overwriting old NULL-price snapshots)
         insert_sql = """
         INSERT OR REPLACE INTO earnings_snapshots
-        (symbol, earnings_date, snapshot_date, days_from_earnings, snapshot_type,
+        (symbol, earnings_date, event_id, snapshot_date, days_from_earnings, snapshot_type,
          open_price, high_price, low_price, close_price, volume, option_volume,
          iv_30dte, iv_front_month, iv_45dte,
          total_open_interest, put_call_ratio,
          is_primary_symbol, straddle_expected_move_pct, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         try:
             cursor.execute(insert_sql, (
                 clean_snapshot['symbol'],
                 clean_snapshot['earnings_date'],
+                clean_snapshot.get('event_id'),
                 clean_snapshot['snapshot_date'],
                 clean_snapshot['days_from_earnings'],
                 clean_snapshot['snapshot_type'],
