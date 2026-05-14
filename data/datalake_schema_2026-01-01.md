@@ -606,18 +606,18 @@
 4. **Severity Classification:** Categorizes IV crush severity
 
 ### earnings_snapshots
-**Rows:** 0
+**Rows:** 20,419
 **Purpose:** Time series IV and price snapshots around earnings (T-7 to T+3)
-**Populated By:** ei_snapshot_capture.py (Earnings Intelligence Strategy)
-**Status:** System implemented but not yet capturing snapshots (awaiting next earnings cycle or manual backfill)
-**Parent Table:** earnings_events (via event_id foreign key)
+**Populated By:** ei_snapshot_collector.py (Earnings Intelligence Strategy)
+**Parent Table:** earnings_events (via event_id foreign key, populated by writer + nightly backfill in ei_main.py sub-step 3.5)
 
 | Column | Type | Description |
 |--------|------|-------------|
 | snapshot_id | INTEGER | Unique snapshot identifier (Primary Key, Auto-increment) |
-| event_id | INTEGER | Foreign key to earnings_events |
+| event_id | INTEGER | Foreign key to earnings_events. NULL for pre-earnings rows whose event has not yet archived. Backfilled nightly. |
 | symbol | TEXT | Ticker symbol (can be primary or peer) |
-| snapshot_date | DATE | Date of snapshot |
+| snapshot_date | DATE | Date the snapshot was captured |
+| earnings_date | DATE | Earnings date AS OF snapshot_date (estimate at capture). Drifts with yfinance revisions. **Not a join key** — join to `earnings_events` via `event_id`, or to `earnings_upcoming`/other tables on `(symbol)` with a fuzzy date window. See policy note in `ei_snapshot_collector.py` docstring. |
 | days_from_earnings | INTEGER | Days before/after earnings (negative = before) |
 | snapshot_type | TEXT | primary_symbol or peer_symbol |
 | close_price | REAL | Closing price |

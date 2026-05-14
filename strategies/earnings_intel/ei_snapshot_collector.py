@@ -18,6 +18,14 @@ Sources (both keyed on data_date):
 - historical_prices: OHLC + stock volume
 - option_symbol_summary: IV, OI, put_call_ratio, option volume
 
+Column policy:
+- `earnings_date` is captured AS-OF `snapshot_date` from `earnings_upcoming`.
+  It can drift across rows in the same event's snapshot series as yfinance
+  revises. This is intentional and consistent with the rest of the system
+  (yfinance-wins rule, 2026-03-23). Do NOT use `(symbol, earnings_date)`
+  as a join key — use `event_id` (populated by this writer when the event
+  has archived, plus a nightly backfill in ei_main.py sub-step 3.5).
+
 Part of: Earnings Intelligence System (PRD 0003)
 Author: Ben (with Claude)
 Date: 2025-10-10 (rewritten 2026-04: yesterday alignment, OHLC, dual-source window)

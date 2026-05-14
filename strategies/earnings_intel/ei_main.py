@@ -215,6 +215,45 @@ def run_daily_pipeline():
             health_reporter.track_task_result('Archive Past Earnings', False, error=str(e))
         archive_time = time.time() - archive_start
 
+        # Sub-step 3.5: Backfill event_id on earnings_snapshots
+        # Closes the writer race (writer runs in Sub-step 2 BEFORE this archive
+        # step has populated earnings_events) and picks up pre-earnings rows
+        # whose events have now archived. Idempotent — WHERE event_id IS NULL.
+        # SQL uses `UPDATE ... FROM` form (SQLite 3.33+). The correlated-subquery
+        # form with JULIANDAY(es.earnings_date) inside the inner WHERE is rejected
+        # by SQLite 3.49 with "no such column" — see proposals/feedback/020_*.md.
+        # Events are quarterly (~90d apart), so the 3-day window matches at most
+        # one event per snapshot row in practice; no closest-match LIMIT needed.
+        print("")
+        beautiful_log("Backfill event_id on earnings_snapshots (3.5/8)", 'info')
+        backfill_start = time.time()
+        try:
+            db_path = os.path.join(project_root, 'data', 'datalake.db')
+            conn = sqlite3.connect(db_path, timeout=30)
+            conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA journal_mode = WAL")
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE earnings_snapshots AS es
+                SET event_id = ee.event_id
+                FROM earnings_events AS ee
+                WHERE es.event_id IS NULL
+                  AND ee.symbol = es.symbol
+                  AND ABS(JULIANDAY(ee.earnings_date) - JULIANDAY(es.earnings_date)) <= 3
+            """)
+            rows_populated = cursor.rowcount
+            conn.commit()
+            conn.close()
+            logging.info("   Populated event_id on {} earnings_snapshots rows".format(rows_populated))
+            health_reporter.track_task_result(
+                'event_id Backfill', True,
+                rows_populated=rows_populated,
+                duration=time.time() - backfill_start)
+        except Exception as e:
+            logging.warning("   event_id backfill failed: {}".format(e))
+            health_reporter.track_task_result('event_id Backfill', False, error=str(e))
+        backfill_time = time.time() - backfill_start
+
         # Sub-step 4: Post-earnings calculation
         print("")
         beautiful_log("Post-Earnings Calculation (4/8)", 'info')
