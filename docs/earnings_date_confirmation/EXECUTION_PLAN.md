@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS earnings_date_disputes (
     db_time TEXT,
     yfinance_date TEXT,
     finnhub_date TEXT,
-    dispute_reason TEXT,        -- 'date_disagreement', 'unknown_time', 'both'
+    dispute_reason TEXT,        -- 'date_disagreement', 'unknown_time', 'both', 'confirmed_row_diverged'
     resolution TEXT,            -- 'confirmed_ben', 'confirmed_agent', 'unresolved', 'skipped'
     resolved_date TEXT,         -- the confirmed correct date
     resolved_time TEXT,         -- the confirmed correct time (bmo/amc)
@@ -249,7 +249,7 @@ Follow the system analyst launcher pattern:
 4. Spawn Claude Code:
    ```
    cd /d E:\options_scanner\agents\earnings_researcher
-   claude --permission-mode bypassPermissions @.session_prompt.md
+   claude --permission-mode auto @.session_prompt.md
    ```
 5. Visible window (Ben wants to watch)
 6. Timeout: 45 minutes
