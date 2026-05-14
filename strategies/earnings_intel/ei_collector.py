@@ -473,6 +473,11 @@ class EarningsCollector:
             'conflicts': 0,        # Existing symbols where sources disagree (logged only)
         }
 
+        # Passive drift detections on date_confirmed=1 rows (Proposal 021).
+        # Each entry: {'symbol', 'stored_date', 'yfinance_date'}. Logged to
+        # earnings_date_disputes at end of method; never writes earnings_upcoming.
+        confirmed_disputes = []
+
         # Load confirmed symbols — skip these entirely (date locked by human or agent)
         confirmed_symbols = set()
         try:
@@ -493,6 +498,35 @@ class EarningsCollector:
         for i, symbol in enumerate(self.stock_symbols, 1):
             if symbol in confirmed_symbols:
                 source_counts['confirmed_skip'] = source_counts.get('confirmed_skip', 0) + 1
+
+                # Passive drift detection (Proposal 021). Fetch yfinance only;
+                # never write earnings_upcoming. If yfinance returns a future-
+                # relevant date that disagrees with the stored confirmed date,
+                # log for human review via earnings_date_disputes.
+                try:
+                    yf_probe = self._fetch_yfinance_data(symbol)
+                    yf_probe_date = yf_probe.get('date') if yf_probe else None
+                    stored_date = existing_dates.get(symbol)
+
+                    if yf_probe_date and stored_date and yf_probe_date != stored_date:
+                        try:
+                            is_future = date.fromisoformat(stored_date) >= today
+                        except (ValueError, TypeError):
+                            is_future = False
+
+                        if is_future:
+                            confirmed_disputes.append({
+                                'symbol': symbol,
+                                'stored_date': stored_date,
+                                'yfinance_date': yf_probe_date,
+                            })
+                            beautiful_log(
+                                "  CONFIRMED-ROW DIVERGENCE: {} stored={} (confirmed), yfinance={}".format(
+                                    symbol, stored_date, yf_probe_date),
+                                level='warning')
+                except Exception as e:
+                    logging.debug("Confirmed-row drift check failed for {}: {}".format(symbol, e))
+
                 continue
             yf_data = {'date': None, 'eps_estimate': None, 'revenue_estimate': None}
             fh_date = None
@@ -642,6 +676,9 @@ class EarningsCollector:
         # Write date source comparison records to performance.db
         self._write_date_source_records(perf_records)
 
+        # Proposal 021: write any passive drift detections on confirmed rows
+        self._write_confirmed_disputes(confirmed_disputes, today_str)
+
         # Queue autofix if high failure rate (fetch errors only, not no-data)
         if fetch_errors > (total * 0.1):
             queue_error(
@@ -764,6 +801,39 @@ class EarningsCollector:
 
         except Exception as e:
             logging.warning("Could not write date source records to performance.db: {}".format(e))
+
+    def _write_confirmed_disputes(self, disputes, trade_date):
+        """Write confirmed-row drift detections to performance.db.earnings_date_disputes.
+
+        Proposal 021: when a date_confirmed=1 row's stored date diverges from
+        yfinance's current value, log to the existing disputes table with
+        dispute_reason='confirmed_row_diverged'. Detection only — no auto-correct.
+
+        Args:
+            disputes: List of dicts with keys symbol, stored_date, yfinance_date
+            trade_date: Today's date string (PK component)
+        """
+        if not disputes:
+            return
+
+        try:
+            perf_db_path = os.path.join(project_root, 'data', 'performance.db')
+            conn = sqlite3.connect(perf_db_path, timeout=30)
+            conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA journal_mode = WAL")
+            for d in disputes:
+                conn.execute("""
+                    INSERT OR REPLACE INTO earnings_date_disputes
+                        (trade_date, symbol, db_date, db_time, yfinance_date, finnhub_date,
+                         dispute_reason, resolution)
+                    VALUES (?, ?, ?, NULL, ?, NULL, 'confirmed_row_diverged', 'unresolved')
+                """, (trade_date, d['symbol'], d['stored_date'], d['yfinance_date']))
+            conn.commit()
+            conn.close()
+            beautiful_log("  Logged {} confirmed-row divergences to earnings_date_disputes".format(
+                len(disputes)), level='info')
+        except Exception as e:
+            logging.warning("Failed to write confirmed-row disputes: {}".format(e))
 
     # --- Helpers ---------------------------------------------------------
 
