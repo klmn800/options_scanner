@@ -486,6 +486,154 @@ class SocialContentGenerator:
 
         return None
 
+    def format_x_followup(self, alert, prior, max_chars=280):
+        """Format a same-contract follow-up post as a delta-first reply tweet.
+
+        Proposal 024: when a prior post on the same contract has already gone
+        out within the conviction window, the publish surface should narrate
+        the conviction build rather than emit a disconnected fresh post.
+        Selects one of three variants from tier-and-VSF state:
+
+            UPGRADE     — new alert_level outranks prior's
+            CONTINUING  — new rank below prior, OR same rank with VSF saturated (<5)
+            STACKING    — same rank, VSF still elevated (>=5)
+
+        Tier-down is funneled to CONTINUING (per proposal) because the alert
+        engine downgrading on the same volume rise reflects VSF saturation,
+        not bearish reversal.
+
+        Args:
+            alert: Current alert dict from flow_alerts (just inserted).
+            prior: Most-recent prior posted alert on same contract (dict with
+                   id, alert_timestamp, alert_level, volume, open_interest,
+                   premium_value, volume_surprise_factor, social_post_id).
+            max_chars: Hard limit. Default 280.
+
+        Returns:
+            str <= max_chars, or None if it can't fit even after trimming.
+        """
+        TIER_RANK = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2}
+        new_rank = TIER_RANK.get(str(alert.get('alert_level') or '').upper(), 1)
+        prior_rank = TIER_RANK.get(str(prior.get('alert_level') or '').upper(), 1)
+        new_vsf = alert.get('volume_surprise_factor') or 0
+        prior_vsf = prior.get('volume_surprise_factor') or 0
+
+        if new_rank > prior_rank:
+            variant = 'UPGRADE'
+        elif new_rank < prior_rank:
+            variant = 'CONTINUING'
+        elif new_vsf >= 5:
+            variant = 'STACKING'
+        else:
+            variant = 'CONTINUING'
+
+        symbol = alert.get('symbol', '?')
+        option_type = (alert.get('option_type') or '').lower()
+        opt_letter = 'C' if option_type == 'call' else 'P'
+        strike_str = self._fmt_strike(alert.get('strike'))
+        exp_short = self._fmt_exp_short(alert.get('expiration_date'))
+        contract_id = f"${symbol} {strike_str}{opt_letter} {exp_short}".rstrip()
+
+        tier_label = str(alert.get('alert_level') or '').upper() or 'MEDIUM'
+        if variant == 'UPGRADE':
+            headline = f"{contract_id} - UPGRADE to {tier_label}"
+        elif variant == 'STACKING':
+            headline = f"{contract_id} - STACKING ({tier_label})"
+        else:
+            headline = f"{contract_id} - CONTINUING ({tier_label})"
+
+        prior_vol = prior.get('volume') or 0
+        new_vol = alert.get('volume') or 0
+        if prior_vol > 0:
+            vol_pct = (new_vol - prior_vol) / prior_vol * 100.0
+            vol_pct_str = f"{vol_pct:+.0f}%"
+        else:
+            vol_pct_str = "new"
+        elapsed_str = self._fmt_elapsed(prior.get('alert_timestamp'), alert.get('alert_timestamp'))
+        delta_window = f" in {elapsed_str}" if elapsed_str else ""
+        vol_line = f"Vol {prior_vol:,} -> {new_vol:,} ({vol_pct_str}{delta_window})"
+
+        prior_premium = prior.get('premium_value') or 0
+        new_premium = alert.get('premium_value') or 0
+        premium_line = (
+            f"Premium {self._fmt_premium(prior_premium)} -> {self._fmt_premium(new_premium)}"
+        )
+
+        prior_oi = prior.get('open_interest') or 0
+        new_oi = alert.get('open_interest') or 0
+        prior_voi = (prior_vol / prior_oi) if prior_oi > 0 else 0
+        new_voi = (new_vol / new_oi) if new_oi > 0 else 0
+        voi_line = f"V/OI {prior_voi:.1f} -> {new_voi:.1f}"
+
+        if variant == 'CONTINUING':
+            body_lines = [
+                vol_line,
+                f"Buying continued; surprise factor saturated (VSF {prior_vsf:.0f} -> {new_vsf:.0f})",
+                f"Total: {self._fmt_short_count(new_vol)} vol on {self._fmt_short_count(new_oi)} OI",
+            ]
+        else:
+            body_lines = [vol_line, premium_line, voi_line]
+
+        time_line = self._fmt_alert_time(alert.get('alert_timestamp'))
+
+        def _build(include_time):
+            lines = [headline, ""] + body_lines
+            if include_time and time_line:
+                lines.extend(["", time_line])
+            return "\n".join(lines)
+
+        for tm in (True, False):
+            tweet = _build(tm)
+            if len(tweet) <= max_chars:
+                return tweet
+        return None
+
+    @staticmethod
+    def _fmt_short_count(n):
+        """Format integer as a compact K/M string (e.g., 13,661 -> '14K', 6,100 -> '6.1K')."""
+        try:
+            n = int(n or 0)
+        except (TypeError, ValueError):
+            return "0"
+        if n >= 1_000_000:
+            return f"{n/1_000_000:.1f}M"
+        if n >= 10_000:
+            return f"{n/1000:.0f}K"
+        if n >= 1000:
+            return f"{n/1000:.1f}K"
+        return f"{n:,}"
+
+    @staticmethod
+    def _fmt_exp_short(exp_date):
+        """Convert YYYY-MM-DD to M/D (no year). For tight-budget follow-up headlines."""
+        if not exp_date:
+            return ""
+        try:
+            dt = datetime.strptime(str(exp_date), '%Y-%m-%d')
+            return f"{dt.month}/{dt.day}"
+        except (ValueError, TypeError):
+            return str(exp_date)
+
+    @staticmethod
+    def _fmt_elapsed(prior_ts, new_ts):
+        """Format the gap between two timestamps as 'Nmin' or 'Xh Ymin'. Empty on parse failure."""
+        if not prior_ts or not new_ts:
+            return ""
+        try:
+            dt_prior = datetime.fromisoformat(str(prior_ts).replace(' ', 'T'))
+            dt_new = datetime.fromisoformat(str(new_ts).replace(' ', 'T'))
+            seconds = (dt_new - dt_prior).total_seconds()
+            if seconds < 0:
+                return ""
+            minutes = int(round(seconds / 60))
+            if minutes < 60:
+                return f"{minutes}min"
+            hours = minutes // 60
+            rem = minutes % 60
+            return f"{hours}h {rem}min" if rem else f"{hours}h"
+        except (ValueError, TypeError):
+            return ""
+
     @staticmethod
     def _fmt_premium(value):
         """Format premium as $X.XM, $XXXK, or $XX,XXX."""

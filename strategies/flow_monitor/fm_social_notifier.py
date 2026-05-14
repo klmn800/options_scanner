@@ -97,23 +97,63 @@ class FMSocialNotifier:
             logging.info(f"Social: daily post cap ({self.max_posts_per_day}) reached — skipping alert {alert_id}")
             return {'queued': False, 'tweet_id': None, 'message': 'daily cap reached'}
 
-        tweet = self._generator.format_for_x(alert)
+        # P024: if a prior post on the same contract is within the conviction
+        # window, publish as a reply-chain follow-up with delta-first body.
+        prior = self._find_prior_same_contract_post(alert)
+        if prior:
+            tweet = self._generator.format_x_followup(alert, prior)
+            in_reply_to = prior.get('social_post_id')
+        else:
+            tweet = self._generator.format_for_x(alert)
+            in_reply_to = None
+
         if not tweet:
             logging.warning(f"Social: alert {alert_id} could not be formatted within 280 chars")
             return {'queued': False, 'tweet_id': None, 'message': 'format failed'}
 
         symbol = alert.get('symbol', '?')
         if self.dry_run:
-            logging.info(f"Social DRY RUN ({symbol} alert {alert_id}, {len(tweet)} chars):\n{tweet}")
+            kind = 'FOLLOW-UP' if prior else 'FRESH'
+            logging.info(f"Social DRY RUN [{kind}] ({symbol} alert {alert_id}, {len(tweet)} chars):\n{tweet}")
             return {'queued': True, 'tweet_id': None, 'message': 'dry run'}
 
-        tweet_id = self._post_tweet(tweet)
+        tweet_id = self._post_tweet(tweet, in_reply_to_tweet_id=in_reply_to)
         if tweet_id is None:
             return {'queued': False, 'tweet_id': None, 'message': 'post failed'}
 
         self._mark_posted(alert_id, tweet_id)
-        logging.info(f"Social: posted alert {alert_id} ({symbol}) as tweet {tweet_id}")
+        kind = 'follow-up' if prior else 'fresh'
+        logging.info(f"Social: posted {kind} alert {alert_id} ({symbol}) as tweet {tweet_id}")
         return {'queued': True, 'tweet_id': tweet_id, 'message': 'posted'}
+
+    def _find_prior_same_contract_post(self, alert):
+        """Find the most recent posted alert on the same contract within 6h.
+
+        P024 conviction-window: detection feeds the format_x_followup template.
+        Filters require social_post_id IS NOT NULL because a follow-up that
+        can't thread (no parent tweet ID on record) falls back to fresh-post
+        framing — handled by the caller.
+        """
+        contract_hash = alert.get('contract_hash')
+        alert_timestamp = alert.get('alert_timestamp')
+        if not contract_hash or not alert_timestamp:
+            return None
+        rows = self.storage.query_with_params(
+            '''
+            SELECT id, alert_timestamp, alert_level, volume, open_interest,
+                   premium_value, volume_surprise_factor, social_post_id
+            FROM flow_alerts
+            WHERE contract_hash = ?
+              AND social_posted = 1
+              AND social_post_id IS NOT NULL
+              AND alert_timestamp >= datetime(?, '-6 hours')
+              AND alert_timestamp < ?
+            ORDER BY alert_timestamp DESC
+            LIMIT 1
+            ''',
+            (contract_hash, alert_timestamp, alert_timestamp)
+        )
+        return dict(rows[0]) if rows else None
 
     def _fetch_alert(self, alert_id):
         rows = self.storage.query_with_params(
@@ -152,8 +192,12 @@ class FMSocialNotifier:
             return False
         return rows[0].get('n', 0) >= self.max_posts_per_day
 
-    def _post_tweet(self, text):
-        """Post via tweepy. Returns tweet_id (int) on success, None on failure."""
+    def _post_tweet(self, text, in_reply_to_tweet_id=None):
+        """Post via tweepy. Returns tweet_id (int) on success, None on failure.
+
+        If in_reply_to_tweet_id is provided (P024 reply-chain), passes through
+        to tweepy.Client.create_tweet for native threading.
+        """
         if self._client is None:
             try:
                 import tweepy
@@ -169,7 +213,10 @@ class FMSocialNotifier:
                 return None
 
         try:
-            resp = self._client.create_tweet(text=text)
+            kwargs = {'text': text}
+            if in_reply_to_tweet_id is not None:
+                kwargs['in_reply_to_tweet_id'] = in_reply_to_tweet_id
+            resp = self._client.create_tweet(**kwargs)
             return int(resp.data['id'])
         except Exception as e:
             logging.error(f"Social: post failed: {type(e).__name__}: {e}")
