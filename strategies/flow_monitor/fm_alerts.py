@@ -351,7 +351,7 @@ class FMAlerts:
         
         # Console notifications (always enabled for development visibility)
         if self.channels.get('console', True):
-            self._send_console_alerts(alerts)
+            self._send_console_alerts(alerts, scan_timestamp)
             self.stats['console_sent'] = len(alerts)
         
         # Email notifications (if configured)
@@ -367,45 +367,303 @@ class FMAlerts:
         
         self.stats['alerts_sent'] = len(alerts)
     
-    def _send_console_alerts(self, alerts):
+    def _send_console_alerts(self, alerts, scan_timestamp):
         """Send alerts to console output, grouped by priority
-        
+
         Args:
             alerts: List of alert dictionaries
+            scan_timestamp: Current cycle scan timestamp (cutoff for history lookup)
         """
         # Group alerts by level
         high_alerts = [a for a in alerts if self._get_alert_level(a.get('significance_score')) == 'HIGH']
         medium_alerts = [a for a in alerts if self._get_alert_level(a.get('significance_score')) == 'MEDIUM']
         low_alerts = [a for a in alerts if self._get_alert_level(a.get('significance_score')) == 'LOW']
-        
+
+        # P011: batch-load symbol context (alert history, watchlist entry,
+        # positions, upcoming earnings) for all alerted symbols in one pass.
+        symbols = list({a.get('symbol') for a in alerts if a.get('symbol')})
+        try:
+            contexts = self._get_symbol_contexts(symbols, scan_timestamp)
+        except Exception as e:
+            logging.warning("Symbol context lookup failed (continuing without): {}".format(e))
+            contexts = {}
+
         print("")
         beautiful_log("\U0001f6a8 FLOW MONITOR ALERTS", level='warning')
         logging.info("Scoring v2: premium + volume surprise (smart money removed 2026-04)")
         print("")
 
+        def emit_with_context(alert):
+            logging.info(self._format_console_alert(alert))
+            for ctx_line in self._format_context_lines(alert, contexts):
+                logging.info("     +-- {}".format(ctx_line))
+
         # High priority alerts first
         if high_alerts:
             logging.info("🔴 HIGH CONVICTION ALERTS (Score 5.0+)")
             for alert in high_alerts:
-                logging.info(self._format_console_alert(alert))
+                emit_with_context(alert)
             print("")
 
         # Medium priority alerts
         if medium_alerts:
             logging.info("🟡 MEDIUM ALERTS (Score 3.5-4.9)")
             for alert in medium_alerts:
-                logging.info(self._format_console_alert(alert))
+                emit_with_context(alert)
             print("")
 
         # Low priority alerts (rare, but handle gracefully)
         if low_alerts:
             logging.info("⚪ LOW PRIORITY ALERTS")
             for alert in low_alerts:
-                logging.info(self._format_console_alert(alert))
+                emit_with_context(alert)
             print("")
 
         logging.info("\U0001f4ca SUMMARY: {} alerts saved ({} HIGH, {} MEDIUM, {} LOW) to flow_alerts".format(
             len(alerts), len(high_alerts), len(medium_alerts), len(low_alerts)))
+
+    # ------------------------------------------------------------------
+    # P011: Symbol Context Lines
+    # ------------------------------------------------------------------
+
+    def _get_symbol_contexts(self, alert_symbols, scan_timestamp):
+        """Batch-load context data for a set of alerted symbols.
+
+        Runs 4 indexed queries returning prior-alert history, watchlist
+        entry price (7d window), open positions, and upcoming earnings
+        (within 30 days). Symbols with no qualifying data are absent
+        from the result dict.
+
+        Args:
+            alert_symbols: Iterable of symbol strings (deduped internally).
+            scan_timestamp: Current cycle scan timestamp; history query
+                            excludes alerts at-or-after this point.
+
+        Returns:
+            dict keyed by symbol with optional keys 'history', 'positions',
+            'earnings'. Format consumed by _format_context_lines().
+        """
+        if not alert_symbols:
+            return {}
+
+        symbols = list({s for s in alert_symbols if s})
+        if not symbols:
+            return {}
+        placeholders = ','.join('?' * len(symbols))
+        contexts = {}
+
+        # 1. Alert history (last 7d, excluding the current cycle)
+        try:
+            history_rows = self.storage.query_with_params(
+                "SELECT symbol, "
+                "       COUNT(*) AS cnt, "
+                "       MIN(alert_timestamp) AS first_ts, "
+                "       SUM(CASE WHEN UPPER(oi_resolution) = 'BUILDING' THEN 1 ELSE 0 END) AS building, "
+                "       SUM(CASE WHEN UPPER(oi_resolution) = 'CLOSING' THEN 1 ELSE 0 END) AS closing, "
+                "       SUM(CASE WHEN UPPER(oi_resolution) = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral, "
+                "       SUM(CASE WHEN oi_resolution IS NULL OR oi_resolution = '' THEN 1 ELSE 0 END) AS pending, "
+                "       CAST(julianday('now') - julianday(MIN(alert_timestamp)) AS INTEGER) AS span_days "
+                "FROM flow_alerts "
+                "WHERE symbol IN ({}) "
+                "  AND alert_timestamp >= datetime('now', '-7 days') "
+                "  AND alert_timestamp < ? "
+                "GROUP BY symbol".format(placeholders),
+                tuple(symbols) + (scan_timestamp,)
+            )
+            for row in history_rows:
+                sym = row['symbol']
+                contexts.setdefault(sym, {})['history'] = {
+                    'count': row.get('cnt') or 0,
+                    'span_days': max(row.get('span_days') or 0, 1),
+                    'building': row.get('building') or 0,
+                    'closing': row.get('closing') or 0,
+                    'neutral': row.get('neutral') or 0,
+                    'pending': row.get('pending') or 0,
+                }
+        except Exception as e:
+            logging.warning("P011 history query failed: {}".format(e))
+
+        # 2. Watchlist entry price (earliest entry_date within 7d per symbol)
+        try:
+            watch_rows = self.storage.query_with_params(
+                "SELECT symbol, entry_ul_price, entry_date "
+                "FROM flow_watchlist_daily "
+                "WHERE symbol IN ({}) "
+                "  AND entry_date >= date('now', '-7 days') "
+                "ORDER BY symbol, entry_date ASC".format(placeholders),
+                tuple(symbols)
+            )
+            seen = set()
+            for row in watch_rows:
+                sym = row['symbol']
+                if sym in seen:
+                    continue
+                seen.add(sym)
+                hist = contexts.setdefault(sym, {}).get('history')
+                if hist is not None:
+                    hist['entry_price'] = row.get('entry_ul_price')
+                    hist['entry_date'] = row.get('entry_date')
+        except Exception as e:
+            logging.warning("P011 watchlist query failed: {}".format(e))
+
+        # 3. Position holdings
+        try:
+            pos_rows = self.storage.query_with_params(
+                "SELECT symbol, instrument_type, strike, option_type, expiration_date, "
+                "       net_qty, avg_buy_price "
+                "FROM trade_positions "
+                "WHERE symbol IN ({}) "
+                "  AND net_qty != 0".format(placeholders),
+                tuple(symbols)
+            )
+            for row in pos_rows:
+                sym = row['symbol']
+                contexts.setdefault(sym, {}).setdefault('positions', []).append(dict(row))
+        except Exception as e:
+            logging.warning("P011 positions query failed: {}".format(e))
+
+        # 4. Earnings proximity (within next 30 days)
+        try:
+            earn_rows = self.storage.query_with_params(
+                "SELECT symbol, earnings_date, earnings_play_signal, "
+                "       CAST(julianday(earnings_date) - julianday(date('now')) AS INTEGER) AS days_to_earn "
+                "FROM earnings_upcoming "
+                "WHERE symbol IN ({}) "
+                "  AND earnings_date BETWEEN date('now') AND date('now', '+30 days')".format(placeholders),
+                tuple(symbols)
+            )
+            for row in earn_rows:
+                sym = row['symbol']
+                contexts.setdefault(sym, {})['earnings'] = {
+                    'earnings_date': row.get('earnings_date'),
+                    'days_to_earn': row.get('days_to_earn'),
+                    'signal': row.get('earnings_play_signal'),
+                }
+        except Exception as e:
+            logging.warning("P011 earnings query failed: {}".format(e))
+
+        return contexts
+
+    def _format_context_lines(self, alert, contexts):
+        """Build 0-N indented context lines for one alert. Returns list of strings."""
+        symbol = alert.get('symbol')
+        ctx = contexts.get(symbol)
+        if not ctx:
+            return []
+
+        lines = []
+
+        history = ctx.get('history')
+        if history and history.get('count', 0) >= 2:
+            line = self._format_history_line(history, alert.get('underlying_price'))
+            if line:
+                lines.append(line)
+
+        for pos in ctx.get('positions', []) or []:
+            line = self._format_position_line(pos)
+            if line:
+                lines.append(line)
+
+        earnings = ctx.get('earnings')
+        if earnings:
+            line = self._format_earnings_line(earnings)
+            if line:
+                lines.append(line)
+
+        return lines
+
+    def _format_history_line(self, history, current_price):
+        """Build alert-history context line.
+
+        Format: '{Nth} alert / {span}d | {B} BUILDING, {C} CLOSING | Entry $X -> now $Y (+Z%)'
+        Resolution segment dropped when majority of prior alerts still pending.
+        Price segment dropped when no qualifying watchlist row in window.
+        """
+        prior_count = history.get('count', 0)
+        if prior_count < 2:
+            return None
+
+        nth = prior_count + 1  # +1 for the current alert
+        if nth % 100 in (11, 12, 13):
+            suffix = 'th'
+        else:
+            suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(nth % 10, 'th')
+
+        span_days = max(history.get('span_days') or 1, 1)
+        parts = ['{}{} alert / {}d'.format(nth, suffix, span_days)]
+
+        building = history.get('building', 0)
+        closing = history.get('closing', 0)
+        pending = history.get('pending', 0)
+        if (building + closing) > pending:
+            parts.append('{} BUILDING, {} CLOSING'.format(building, closing))
+
+        entry_price = history.get('entry_price')
+        if entry_price and current_price:
+            try:
+                entry_f = float(entry_price)
+                current_f = float(current_price)
+                if entry_f > 0:
+                    change = (current_f - entry_f) / entry_f * 100
+                    parts.append('Entry ${:.2f} -> now ${:.2f} ({:+.0f}%)'.format(
+                        entry_f, current_f, change))
+            except Exception:
+                pass
+
+        return ' | '.join(parts)
+
+    def _format_position_line(self, pos):
+        """Build position context line for one trade_positions row."""
+        instrument = (pos.get('instrument_type') or '').lower()
+        qty = pos.get('net_qty', 0)
+        avg = pos.get('avg_buy_price')
+        if avg is None:
+            return None
+
+        try:
+            avg_f = float(avg)
+        except (TypeError, ValueError):
+            return None
+
+        if instrument in ('stock', 'equity'):
+            return 'Holding {} shares @ {:.2f}'.format(qty, avg_f)
+
+        # Option
+        strike = pos.get('strike')
+        option_type = (pos.get('option_type') or '').upper()
+        exp = pos.get('expiration_date')
+        if strike is None or not option_type or not exp:
+            return None
+
+        try:
+            strike_f = float(strike)
+            strike_str = '{:.0f}'.format(strike_f) if strike_f == int(strike_f) else '{:.2f}'.format(strike_f)
+        except (TypeError, ValueError):
+            strike_str = str(strike)
+
+        try:
+            exp_dt = datetime.strptime(exp, '%Y-%m-%d')
+            mon = exp_dt.strftime('%b')
+            day = str(exp_dt.day)
+            exp_short = '{} {}'.format(mon, day)
+        except (ValueError, TypeError):
+            exp_short = exp
+
+        type_char = option_type[0]  # 'C' or 'P'
+        return 'Holding {}x {} {}{} @ {:.2f}'.format(qty, exp_short, strike_str, type_char, avg_f)
+
+    def _format_earnings_line(self, earnings):
+        """Build earnings proximity context line."""
+        ed = earnings.get('earnings_date')
+        dte = earnings.get('days_to_earn')
+        signal = earnings.get('signal')
+        if not ed or dte is None:
+            return None
+
+        line = 'Earnings {} ({}d)'.format(ed, dte)
+        if signal:
+            line += ' | {}'.format(signal)
+        return line
     
     def _detect_roll(self, alert, scan_contracts, config):
         """Detect if an alert is part of a position roll (closing one strike, opening another).
