@@ -911,8 +911,9 @@ class OIDSymbolRollup:
 
         historical_ivs = self.storage.query_db(query, (symbol, trade_date, trade_date))
 
-        if not historical_ivs or len(historical_ivs) < 20:
-            # Need at least 20 days of history for meaningful percentile
+        if not historical_ivs or len(historical_ivs) < 15:
+            # Need at least 15 days of history for meaningful percentile
+            # (30-day archive retention + holidays can drop below 20 trading days)
             return None
 
         # Extract IV values
