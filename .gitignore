@@ -50,6 +50,11 @@ plans/
 # Autonomous Claude Code agents (workspaces with their own .git repos)
 agents/system_analyst/
 agents/trading_advisor/
+agents/earnings_researcher/
+agents/roundtable/
+
+# Multi-LLM council prototype (binary + experimental)
+ai_council/
 
 # Generated task lists
 tasks/
