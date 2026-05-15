@@ -446,10 +446,12 @@ def refresh_trade_positions(conn, position_key=None, mirror_conn=None):
           most-recent matching status='proposed' trade_call. On match, copy
           target_pct/stop_pct/time_stop_date and flip the trade_call to 'open'
           (mirrored).
-        - net_qty != 0 with existing row: UPDATE the computed columns only
-          (net_qty, avg_buy_price, total_cost, opened_at, last_action_at).
-          User-editable fields (target_pct, stop_pct, time_stop_date,
-          trade_call_ref, notes) are preserved.
+        - net_qty != 0 with existing row: UPDATE the computed columns
+          (net_qty, avg_buy_price, total_cost, opened_at, last_action_at)
+          and propagate notes from trade_executions (chronological concat
+          of all non-null execution notes; NULL preserves existing value
+          via COALESCE). User-editable fields (target_pct, stop_pct,
+          time_stop_date, trade_call_ref) are preserved.
 
     Mirroring: quick-sync (db_backup.py) is INSERT-only and cannot propagate
     DELETEs or UPDATEs to existing rows. The refresh helper writes those
@@ -550,27 +552,40 @@ def _refresh_one_position(conn, mirror_conn, position_key):
         time_stop_date = link_info['time_stop_date'] if link_info else None
         trade_call_ref = link_info['id'] if link_info else None
 
-        conn.execute("""
+        insert_sql = """
             INSERT INTO trade_positions (
                 position_key, symbol, instrument_type, strike, option_type, expiration_date,
                 net_qty, avg_buy_price, total_cost, opened_at, last_action_at,
                 target_pct, stop_pct, time_stop_date, trade_call_ref, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-        """, (position_key, agg['symbol'], agg['instrument_type'],
-              agg['strike'], agg['option_type'], agg['expiration_date'],
-              net_qty, avg_buy_price, total_cost, agg['opened_at'], agg['last_action_at'],
-              target_pct, stop_pct, time_stop_date, trade_call_ref))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        insert_params = (position_key, agg['symbol'], agg['instrument_type'],
+                         agg['strike'], agg['option_type'], agg['expiration_date'],
+                         net_qty, avg_buy_price, total_cost, agg['opened_at'], agg['last_action_at'],
+                         target_pct, stop_pct, time_stop_date, trade_call_ref, agg['notes_concat'])
+        conn.execute(insert_sql, insert_params)
+        if mirror_conn is not None:
+            mirror_conn.execute(insert_sql, insert_params)
         counters['created'] = 1
         if link_info is not None:
             counters['auto_linked'] = 1
     else:
-        conn.execute("""
+        # COALESCE on notes: when no executions have non-null notes, agg['notes_concat']
+        # is NULL and the existing trade_positions.notes value is preserved. Any non-null
+        # concatenation overwrites — chronological recompute, so we always reflect the
+        # current set of execution notes rather than appending blindly.
+        update_sql = """
             UPDATE trade_positions
                SET net_qty = ?, avg_buy_price = ?, total_cost = ?,
-                   opened_at = ?, last_action_at = ?
+                   opened_at = ?, last_action_at = ?,
+                   notes = COALESCE(?, notes)
              WHERE position_key = ?
-        """, (net_qty, avg_buy_price, total_cost,
-              agg['opened_at'], agg['last_action_at'], position_key))
+        """
+        update_params = (net_qty, avg_buy_price, total_cost,
+                         agg['opened_at'], agg['last_action_at'], agg['notes_concat'], position_key)
+        conn.execute(update_sql, update_params)
+        if mirror_conn is not None:
+            mirror_conn.execute(update_sql, update_params)
         counters['updated'] = 1
 
     return counters
@@ -602,6 +617,21 @@ def _aggregate_executions(conn, position_key):
     # Without this, _try_auto_link's WHERE option_type = ? misses matches.
     option_type = row[9].upper() if row[9] else None
 
+    note_rows = conn.execute("""
+        SELECT execution_timestamp, action, notes
+        FROM trade_executions
+        WHERE position_key = ? AND notes IS NOT NULL AND TRIM(notes) != ''
+        ORDER BY execution_timestamp ASC, id ASC
+    """, (position_key,)).fetchall()
+
+    notes_concat = None
+    if note_rows:
+        lines = []
+        for ts, action, note in note_rows:
+            date_part = (ts or '')[:10] or '????-??-??'
+            lines.append("{} {}: {}".format(date_part, action, note.strip()))
+        notes_concat = "\n".join(lines)
+
     return {
         'net_qty': int(row[0]),
         'buy_total_value': row[1] or 0.0,
@@ -614,6 +644,7 @@ def _aggregate_executions(conn, position_key):
         'strike': row[8],
         'option_type': option_type,
         'expiration_date': row[10],
+        'notes_concat': notes_concat,
     }
 
 
