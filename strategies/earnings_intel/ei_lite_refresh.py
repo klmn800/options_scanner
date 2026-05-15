@@ -349,7 +349,11 @@ def run_lite_refresh(db_path=None, perf_db_path=None, days_ahead=21, spawn_agent
 # ---------------------------------------------------------------------------
 
 def _spawn_earnings_researcher(dispute_count):
-    """Spawn earnings researcher agent in a visible window (fire-and-forget)."""
+    """Spawn earnings researcher agent in a visible window (fire-and-forget).
+
+    Uses a temp batch file to avoid cmd.exe /k quoting issues with multiple
+    quoted paths (cmd /k "prog" "arg" mangles the middle quotes).
+    """
     launcher_path = os.path.join(project_root, 'agents', 'earnings_researcher', 'launcher.py')
     if not os.path.exists(launcher_path):
         logging.info("   Earnings researcher agent not installed — skipping auto-spawn")
@@ -357,8 +361,14 @@ def _spawn_earnings_researcher(dispute_count):
 
     try:
         python_exe = sys.executable
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.bat', delete=False, encoding='utf-8') as f:
+            f.write('@echo off\n')
+            f.write('cd /d "{}"\n'.format(project_root))
+            f.write('"{}" "{}"\n'.format(python_exe, launcher_path))
+            bat_file = f.name
+
         subprocess.Popen(
-            'start "Earnings Researcher" cmd /k "{}" "{}"'.format(python_exe, launcher_path),
+            'start "Earnings Researcher" cmd /k "{}"'.format(bat_file),
             shell=True,
             cwd=project_root,
         )
