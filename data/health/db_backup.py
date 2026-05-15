@@ -1562,6 +1562,18 @@ def create_query_sync(interactive=True, retry_attempt=0, max_retries=3):
         # Readers will see the old data until backup completes, then atomically see new data
         target_conn = sqlite3.connect(target)
 
+        # SYNC PERF FIX (2026-05-14): The full sync was running at ~3 MB/sec (95 min for 17.8 GB)
+        # due to a stack of three issues on the target connection:
+        #   1. WAL mode → every committed page double-writes (WAL file + checkpoint)
+        #   2. synchronous=FULL → fsync on every commit
+        #   3. pages=100 in the backup loop → ~45,600 commits for 4.56M pages
+        # Switch the target to DELETE journal + synchronous=NORMAL for the duration of the
+        # backup. Lock file already prevents concurrent readers, so durability/reader-friendly
+        # WAL is unnecessary here. WAL is restored in the finally block before close so that
+        # Morning View / Oracle continue to see the query DB in WAL mode.
+        target_conn.execute('PRAGMA journal_mode=DELETE')
+        target_conn.execute('PRAGMA synchronous=NORMAL')
+
         try:
             # Progress callback for large databases
             pages_copied = [0]  # Use list to allow modification in nested function
@@ -1581,7 +1593,9 @@ def create_query_sync(interactive=True, retry_attempt=0, max_retries=3):
             # Readers can access target during backup and see consistent snapshot
             print("   Backing up {} to {}...".format(
                 os.path.basename(source), os.path.basename(target)))
-            source_conn.backup(target_conn, pages=100, progress=progress)
+            # pages=10000 (was 100): cuts commits ~100x while keeping the progress callback firing.
+            # Concurrent reader friendliness is moot here — the sync lock file already blocks readers.
+            source_conn.backup(target_conn, pages=10000, progress=progress)
 
             # Final progress
             if total_pages[0] > 0:
@@ -1594,6 +1608,15 @@ def create_query_sync(interactive=True, retry_attempt=0, max_retries=3):
             # RESOURCE CLEANUP
             # Close connections to release resources
             # Note: No rename operation needed anymore, so no WinError 32 issues!
+
+            # Restore WAL mode on target before closing. journal_mode is persisted in the
+            # SQLite file header, so leaving it as DELETE would force every future reader
+            # (Morning View, Oracle) into DELETE mode and lose concurrent-read benefits.
+            # synchronous is per-connection only — no restore needed.
+            try:
+                target_conn.execute('PRAGMA journal_mode=WAL')
+            except Exception as wal_restore_err:
+                logger.warning("Could not restore WAL mode on target: {}".format(wal_restore_err))
 
             # Close both connections
             target_conn.close()
