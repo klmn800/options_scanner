@@ -109,6 +109,24 @@ class MorningViewsData:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _ensure_watchlist_table(self, conn):
+        """Create user_watchlist table if it doesn't exist (matches morning_views.py schema)"""
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_watchlist (
+                symbol TEXT PRIMARY KEY,
+                added_date TEXT NOT NULL,
+                added_reason TEXT,
+                user_notes TEXT,
+                priority INTEGER DEFAULT 0,
+                removed_date TEXT,
+                FOREIGN KEY (symbol) REFERENCES symbol_metadata(symbol)
+            )
+        ''')
+        conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_watchlist_active
+            ON user_watchlist(removed_date)
+        ''')
+
     def _row_to_dict(self, row: sqlite3.Row) -> Dict:
         """Convert sqlite3.Row to dictionary"""
         return dict(row) if row else {}
@@ -218,6 +236,7 @@ class MorningViewsData:
         """
         # Use write connection to read watchlist (it's stored in datalake.db)
         with self._get_write_connection() as conn:
+            self._ensure_watchlist_table(conn)
             cursor = conn.cursor()
 
             # Determine sort order
@@ -285,6 +304,7 @@ class MorningViewsData:
         """
         try:
             with self._get_write_connection() as conn:
+                self._ensure_watchlist_table(conn)
                 cursor = conn.cursor()
 
                 # Check if symbol already exists (including removed ones)
@@ -338,6 +358,7 @@ class MorningViewsData:
         """
         try:
             with self._get_write_connection() as conn:
+                self._ensure_watchlist_table(conn)
                 cursor = conn.cursor()
 
                 cursor.execute("""
@@ -375,6 +396,7 @@ class MorningViewsData:
         """
         # Use write connection to read watchlist (it's stored in datalake.db)
         with self._get_write_connection() as conn:
+            self._ensure_watchlist_table(conn)
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT 1 FROM user_watchlist
