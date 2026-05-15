@@ -102,11 +102,13 @@ class AlertEvaluator:
                 else:
                     logging.debug("All required tables present")
 
-                # Recreate view if it has the old expiration_date filter (survivorship bias fix)
+                # Recreate view if it has the old expiration_date filter (P008 survivorship bias fix)
+                # OR the old contract_hash dedup INNER JOIN (P023 per-alert eval fix)
                 cursor.execute("SELECT sql FROM sqlite_master WHERE type='view' AND name='active_alerts_for_evaluation'")
                 view_row = cursor.fetchone()
-                if view_row and 'expiration_date' in (view_row[0] or ''):
-                    logging.info("Dropping old active_alerts_for_evaluation view (removing expiration_date filter)")
+                old_sql = (view_row[0] or '') if view_row else ''
+                if view_row and ('expiration_date' in old_sql or 'first_alert' in old_sql):
+                    logging.info("Dropping old active_alerts_for_evaluation view (P023: removing contract_hash dedup)")
                     cursor.execute("DROP VIEW active_alerts_for_evaluation")
                     conn.commit()
                     view_row = None
@@ -116,18 +118,10 @@ class AlertEvaluator:
                     logging.debug("Creating active_alerts_for_evaluation view...")
                     cursor.execute('''
                         CREATE VIEW active_alerts_for_evaluation AS
-                        SELECT fa.*
-                        FROM flow_alerts fa
-                        INNER JOIN (
-                            SELECT contract_hash, MIN(alert_timestamp) as first_alert
-                            FROM flow_alerts
-                            WHERE (evaluation_status IS NULL OR evaluation_status = 'active')
-                              AND datetime(alert_timestamp) > datetime('now', '-30 days')
-                            GROUP BY contract_hash
-                        ) first_alerts
-                        ON fa.contract_hash = first_alerts.contract_hash
-                        AND fa.alert_timestamp = first_alerts.first_alert
-                        WHERE (fa.evaluation_status IS NULL OR fa.evaluation_status = 'active')
+                        SELECT *
+                        FROM flow_alerts
+                        WHERE (evaluation_status IS NULL OR evaluation_status = 'active')
+                          AND datetime(alert_timestamp) > datetime('now', '-30 days')
                     ''')
                     conn.commit()
                     logging.debug("Created active_alerts_for_evaluation view")
