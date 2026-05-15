@@ -10,14 +10,14 @@ Key Features:
 - Median of log1p(volume) instead of mean for robustness
 - MAD (Median Absolute Deviation) * 1.4826 for standard deviation equivalent
 - Separate vol/oi ratio statistics
-- Bulk query approach: one scan of flow_options_scans instead of per-symbol queries
+- Bulk query approach: one scan of flow_daily_aggregates instead of per-symbol queries
 
 Technical Notes:
 - Uses log1p() transformation to handle zero volumes
 - MAD multiplier 1.4826 makes it equivalent to standard deviation for normal distributions
 - Groups by symbol and aggregates across all contracts daily
 
-Reads: flow_options_scans (bulk GROUP BY symbol, trade_date)
+Reads: flow_daily_aggregates (pre-materialized per-symbol daily totals; P028)
 Writes: symbol_baselines (INSERT OR REPLACE, batch)
 
 Author: Ben (with assistance from Claude)
@@ -62,8 +62,8 @@ class OptionBaselineGenerator:
         """Generate option volume baselines for specified symbols
 
         Uses a single bulk query to fetch all daily aggregates, then computes
-        baselines in Python and batch-writes results. Much faster than per-symbol
-        queries against the large flow_options_scans table.
+        baselines in Python and batch-writes results. Reads from flow_daily_aggregates
+        (pre-materialized once per cycle) — decoupled from raw flow_options_scans retention.
 
         Args:
             symbols: List of symbols to process from KLMN 800 list
@@ -97,7 +97,7 @@ class OptionBaselineGenerator:
 
         # --- Phase 1: Bulk query all daily aggregates ---
         query_start = time.time()
-        beautiful_log("Querying flow_options_scans...", 'info')
+        beautiful_log("Querying flow_daily_aggregates...", 'info')
 
         try:
             bulk_data = self._fetch_all_daily_aggregates(start_date, end_date)
@@ -197,15 +197,10 @@ class OptionBaselineGenerator:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT symbol, trade_date,
-                       SUM(volume) as daily_volume,
-                       SUM(open_interest) as daily_oi,
-                       COUNT(*) as contract_count
-                FROM flow_options_scans
+                SELECT symbol, trade_date, daily_volume, daily_oi, contract_count
+                FROM flow_daily_aggregates
                 WHERE trade_date >= ?
                     AND trade_date <= ?
-                GROUP BY symbol, trade_date
-                HAVING daily_volume > 0
                 ORDER BY symbol, trade_date
             ''', (start_date, end_date))
 
@@ -398,6 +393,62 @@ class OptionBaselineGenerator:
                 else:
                     logging.info("  NEW BASELINE (no previous data)")
                 logging.info("")
+
+
+def materialize_daily_aggregate(db_path=None, trade_date=None):
+    """Upsert today's flow_daily_aggregates row from flow_options_scans.
+
+    Single bulk SQL — no per-symbol loop. Idempotent via ON CONFLICT DO UPDATE.
+    Self-heals schema on fresh DB via embedded CREATE TABLE IF NOT EXISTS.
+    Called once per post-market FM cycle by run_daily_aggregate_task.
+    """
+    if db_path is None:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        db_path = os.path.join(project_root, 'data', 'datalake.db')
+    if trade_date is None:
+        trade_date = eastern_date_string()
+
+    schema_sql = """
+        CREATE TABLE IF NOT EXISTS flow_daily_aggregates (
+            symbol TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            daily_volume INTEGER NOT NULL,
+            daily_oi INTEGER NOT NULL,
+            contract_count INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (symbol, trade_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_fda_trade_date ON flow_daily_aggregates(trade_date);
+    """
+
+    upsert_sql = """
+        INSERT INTO flow_daily_aggregates
+            (symbol, trade_date, daily_volume, daily_oi, contract_count, updated_at)
+        SELECT symbol, trade_date,
+               COALESCE(SUM(volume), 0)        AS daily_volume,
+               COALESCE(SUM(open_interest), 0) AS daily_oi,
+               COUNT(*)                         AS contract_count,
+               ?                                AS updated_at
+        FROM flow_options_scans
+        WHERE trade_date = ?
+        GROUP BY symbol, trade_date
+        HAVING daily_volume > 0
+        ON CONFLICT(symbol, trade_date) DO UPDATE SET
+            daily_volume   = excluded.daily_volume,
+            daily_oi       = excluded.daily_oi,
+            contract_count = excluded.contract_count,
+            updated_at     = excluded.updated_at
+    """
+
+    with sqlite3.connect(db_path, timeout=30.0) as conn:
+        conn.executescript(schema_sql)
+        cursor = conn.cursor()
+        cursor.execute(upsert_sql, (eastern_isoformat(), trade_date))
+        rows_affected = cursor.rowcount
+        conn.commit()
+
+    logging.debug("flow_daily_aggregates: upserted {} rows for {}".format(rows_affected, trade_date))
+    return rows_affected
 
 
 def main():

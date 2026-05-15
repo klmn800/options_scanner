@@ -281,7 +281,7 @@ script_start_time = None
 # Three-tier archival policy configuration
 TIER_POLICIES = {
     'tier1': {
-        'retention_days': 15,
+        'retention_days': 7,  # P028: cut 15→7. flow_alerts unaffected (mode='copy' override skips DELETE)
         'mode': 'move',  # INSERT into archive + DELETE from production
         'tables': {
             'flow_options_scans': {
@@ -310,18 +310,6 @@ TIER_POLICIES = {
                 'routing': 'symbol',
                 'primary_key': ['contract_hash', 'trade_date'],
                 'hybrid_strategy': True  # Archive if expired OR old
-            },
-            'option_symbol_summary': {
-                'date_column': 'trade_date',
-                'symbol_column': 'symbol',
-                'routing': 'symbol',
-                'primary_key': ['symbol', 'trade_date']
-            },
-            'flow_symbol_summary': {
-                'date_column': 'trade_date',
-                'symbol_column': 'symbol',
-                'routing': 'symbol',
-                'primary_key': ['symbol', 'trade_date']
             }
         }
     },
@@ -359,6 +347,27 @@ TIER_POLICIES = {
                 'date_column': 'trade_date',
                 'routing': 'all_sectors',  # Special: copy to every sector archive
                 'primary_key': ['trade_date']
+            },
+            'option_symbol_summary': {
+                'date_column': 'trade_date',
+                'symbol_column': 'symbol',
+                'routing': 'symbol',
+                'primary_key': ['symbol', 'trade_date'],
+                'retention_days_override': 300  # P028: extended retention for baseline/research
+            },
+            'flow_symbol_summary': {
+                'date_column': 'trade_date',
+                'symbol_column': 'symbol',
+                'routing': 'symbol',
+                'primary_key': ['trade_date', 'symbol'],  # PK order differs from option_symbol_summary
+                'retention_days_override': 300  # P028: extended retention for baseline/research
+            },
+            'flow_daily_aggregates': {
+                'date_column': 'trade_date',
+                'symbol_column': 'symbol',
+                'routing': 'symbol',
+                'primary_key': ['symbol', 'trade_date'],
+                'retention_days_override': 300  # P028: new aggregate replacing flow_options_scans for baselines
             }
         }
     }
@@ -1402,7 +1411,6 @@ def cleanup_tier3_production(tier_config, test_mode=False):
     """
     source_db = SOURCE_DB
     source_path = os.path.join(project_root, 'data', source_db)
-    retention_days = tier_config['retention_days']
 
     stats = {
         'total_deleted': 0,
@@ -1427,6 +1435,8 @@ def cleanup_tier3_production(tier_config, test_mode=False):
                 print(f"  - {table_name}: Skipped (retained in production)")
                 continue
 
+            # P028: per-table override (skip_cleanup tables short-circuit above, so no wasted lookup)
+            retention_days = table_config.get('retention_days_override', tier_config['retention_days'])
             date_column = table_config['date_column']
             cutoff_date = (datetime.now().date() - timedelta(days=retention_days)).strftime('%Y-%m-%d')
 
@@ -1659,8 +1669,10 @@ def analyze_archive_impact(tiers_to_run, test_mode=False):
                     print(f"\n  ⚠️ {table_name}: Table not found in database")
                     continue
 
+                # P028: per-table override (tier-level retention_days still drives banner/stats above)
+                table_retention_days = table_config.get('retention_days_override', retention_days)
                 date_column = table_config['date_column']
-                cutoff_date = (datetime.now().date() - timedelta(days=retention_days)).strftime('%Y-%m-%d')
+                cutoff_date = (datetime.now().date() - timedelta(days=table_retention_days)).strftime('%Y-%m-%d')
 
                 # Build WHERE clause
                 if table_config.get('hybrid_strategy'):
@@ -1919,13 +1931,13 @@ def main():
             tier1_errors = 0
 
             print(f"\n{'=' * 70}")
-            print("TIER 1: HIGH-FREQUENCY DATA (15-day retention, MOVE)")
+            print("TIER 1: HIGH-FREQUENCY DATA (7-day retention, MOVE)")
             print("=" * 70)
             print(f"Tier 1 Start: {tier_start_timestamp.strftime('%Y-%m-%d %H:%M:%S EST')}")
             print(f"Source: {SOURCE_DB}")
             print("=" * 70)
             logger.debug("=" * 50)
-            logger.debug("TIER 1 START: 15-day retention, MOVE mode")
+            logger.debug("TIER 1 START: 7-day retention, MOVE mode")
 
             tier_config = TIER_POLICIES['tier1']
             for table_name, table_config in tier_config['tables'].items():
@@ -1933,7 +1945,7 @@ def main():
                     table_name,
                     tier_config,
                     table_config,
-                    tier_config['retention_days'],
+                    table_config.get('retention_days_override', tier_config['retention_days']),
                     test_mode=args.test_mode
                 )
                 overall_stats['total_archived'] += stats['total_archived']
@@ -2008,7 +2020,7 @@ def main():
                     table_name,
                     tier_config,
                     table_config,
-                    tier_config['retention_days'],
+                    table_config.get('retention_days_override', tier_config['retention_days']),
                     test_mode=args.test_mode
                 )
                 overall_stats['total_archived'] += stats['total_archived']
@@ -2087,7 +2099,7 @@ def main():
                     table_name,
                     tier_config,
                     table_config,
-                    tier_config['retention_days'],
+                    table_config.get('retention_days_override', tier_config['retention_days']),
                     test_mode=args.test_mode
                 )
                 overall_stats['total_archived'] += stats['total_archived']

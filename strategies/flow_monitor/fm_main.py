@@ -948,6 +948,22 @@ def run_symbol_rollup_task(health_reporter=None):
         }
 
 
+def run_daily_aggregate_task(health_reporter=None):
+    """Materialize today's flow_daily_aggregates row. Runs once post-rollup, EOD."""
+    from strategies.flow_monitor.fm_baseline_generator import materialize_daily_aggregate
+    start = time.time()
+    try:
+        rows = materialize_daily_aggregate()
+        return {
+            'success': True,
+            'duration_seconds': time.time() - start,
+            'rows_upserted': rows,
+        }
+    except Exception as e:
+        logging.error("Daily aggregate upsert failed: {}".format(e))
+        return {'success': False, 'duration_seconds': time.time() - start, 'error': str(e)}
+
+
 def run_analysis_backfill_task():
     """Run comprehensive analysis backfill for all today's scans"""
     logging.info("Running comprehensive analysis backfill...")
@@ -2002,7 +2018,7 @@ def run_post_market():
 
     # Run tasks directly (no scheduler needed)
     tasks_successful = 0
-    total_tasks = 5  # backfill, regime, rollup, evaluation, watchlist cleanup
+    total_tasks = 6  # backfill, regime, rollup, daily aggregate, evaluation, watchlist cleanup
     total_errors = 0
 
     # Collect sub-task results
@@ -2014,13 +2030,14 @@ def run_post_market():
             "Task 1: Historical Backfill \u2014 Update price data for all symbols",
             "Task 2: Market Regime Summary \u2014 Classify today's market behavior",
             "Task 3: Symbol Rollup \u2014 Aggregate contract data to symbol level",
-            "Task 4: Daily Evaluation \u2014 Score and evaluate today's scans",
-            "Task 5: Watchlist Cleanup \u2014 Archive expired watchlist entries",
+            "Task 4: Daily Flow Aggregate \u2014 Materialize flow_daily_aggregates row",
+            "Task 5: Daily Evaluation \u2014 Score and evaluate today's scans",
+            "Task 6: Watchlist Cleanup \u2014 Archive expired watchlist entries",
         ]
     )
 
     # Task 1: Historical backfill (moved from pre-market for fresh data)
-    _step_header(1, 5, "Historical Backfill")
+    _step_header(1, 6, "Historical Backfill")
     backfill_result = run_historical_backfill(health_reporter)
     sub_tasks['backfill'] = backfill_result
 
@@ -2038,7 +2055,7 @@ def run_post_market():
         total_errors += 1
 
     # Task 2: Market regime summary (now runs after backfill)
-    _step_header(2, 5, "Market Regime Summary")
+    _step_header(2, 6, "Market Regime Summary")
     regime_result = run_evening_market_regime_summary(health_reporter)
     sub_tasks['market_regime'] = regime_result
 
@@ -2058,7 +2075,7 @@ def run_post_market():
         total_errors += 1
 
     # Task 3: Symbol rollup
-    _step_header(3, 5, "Symbol Rollup")
+    _step_header(3, 6, "Symbol Rollup")
     rollup_result = run_symbol_rollup_task(health_reporter)
     sub_tasks['symbol_rollup'] = rollup_result
 
@@ -2071,7 +2088,7 @@ def run_post_market():
             rollup_result.get('summaries_created', 0),
             rollup_result['duration_seconds']))
 
-        coffee_break(60, context='task_complete', next_task='Daily Evaluation')
+        coffee_break(60, context='task_complete', next_task='Daily Flow Aggregate')
     else:
         logging.warning("Symbol rollup failed")
         diag_logger.info("[{}] Symbol Rollup: FAILED ({:.1f}s)".format(
@@ -2079,8 +2096,28 @@ def run_post_market():
             rollup_result['duration_seconds']))
         total_errors += rollup_result.get('errors', 1)
 
-    # Task 4: Daily evaluation
-    _step_header(4, 5, "Daily Evaluation")
+    # Task 4: Daily Flow Aggregate (P028 Change 2)
+    _step_header(4, 6, "Daily Flow Aggregate")
+    agg_result = run_daily_aggregate_task(health_reporter)
+    sub_tasks['daily_aggregate'] = agg_result
+
+    if agg_result['success']:
+        logging.debug("Daily flow aggregate completed")
+        tasks_successful += 1
+        diag_logger.info("[{}] Daily Flow Aggregate: {} rows upserted | {:.1f}s".format(
+            now_eastern().strftime('%Y-%m-%d %H:%M:%S'),
+            agg_result.get('rows_upserted', 0),
+            agg_result['duration_seconds']))
+        coffee_break(60, context='task_complete', next_task='Daily Evaluation')
+    else:
+        logging.warning("Daily flow aggregate failed")
+        diag_logger.info("[{}] Daily Flow Aggregate: FAILED ({:.1f}s)".format(
+            now_eastern().strftime('%Y-%m-%d %H:%M:%S'),
+            agg_result['duration_seconds']))
+        total_errors += 1
+
+    # Task 5: Daily evaluation
+    _step_header(5, 6, "Daily Evaluation")
     eval_result = run_daily_evaluation_task(health_reporter)
     sub_tasks['evaluation'] = eval_result
 
@@ -2151,8 +2188,8 @@ def run_post_market():
         diag_logger.info("[{}] Agent Analysis: SKIPPED (--no-agent flag)".format(
             now_eastern().strftime('%Y-%m-%d %H:%M:%S')))
 
-    # Task 5: Watchlist Cleanup (archive expired entries)
-    _step_header(5, 5, "Watchlist Cleanup")
+    # Task 6: Watchlist Cleanup (archive expired entries)
+    _step_header(6, 6, "Watchlist Cleanup")
     cleanup_start = time.time()
     cleanup_result = {'success': False, 'duration_seconds': 0.0, 'entries_archived': 0, 'entries_deleted': 0}
 
