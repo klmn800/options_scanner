@@ -95,8 +95,16 @@ class GmailReader:
 
         self._service = None
 
-    def authenticate(self):
-        """Run OAuth2 authentication flow. Returns True if successful."""
+    def authenticate(self, interactive=False):
+        """Run OAuth2 authentication flow. Returns True if successful.
+
+        Args:
+            interactive: If True, fall back to a blocking browser/local-server
+                OAuth flow when no valid token exists. Only the `--auth` CLI
+                passes True. Background callers (orchestrator, lazy `service`
+                property) pass False so a missing/revoked token returns False
+                cleanly instead of hanging waiting for an OAuth callback.
+        """
         creds = None
 
         if self.token_file.exists():
@@ -113,10 +121,15 @@ class GmailReader:
                     creds.refresh(Request())
                 except Exception as e:
                     logging.warning("Token refresh failed: {}".format(e))
-                    logging.debug("Re-running full auth flow...")
                     creds = None
 
             if not creds:
+                if not interactive:
+                    logging.warning(
+                        "Gmail token missing/revoked and interactive=False; "
+                        "skipping browser OAuth flow. Run `python tools/email_reader.py --auth` to re-authenticate."
+                    )
+                    return False
                 if not self.client_secret_file.exists():
                     print(f"ERROR: Client secret file not found: {self.client_secret_file}")
                     return False
@@ -137,10 +150,10 @@ class GmailReader:
 
     @property
     def service(self):
-        """Lazy-authenticated Gmail service."""
+        """Lazy-authenticated Gmail service. Non-interactive — never opens a browser."""
         if self._service is None:
-            if not self.authenticate():
-                raise RuntimeError("Gmail authentication failed")
+            if not self.authenticate(interactive=False):
+                raise RuntimeError("Gmail authentication failed (token missing/revoked; run --auth)")
         return self._service
 
     # ── Message listing ─────────────────────────────────────────────
@@ -433,7 +446,7 @@ Gmail search syntax examples:
         reader = GmailReader()
 
         if args.auth:
-            success = reader.authenticate()
+            success = reader.authenticate(interactive=True)
             if success:
                 profile = reader.service.users().getProfile(userId='me').execute()
                 print(f"Authenticated as: {profile['emailAddress']}")

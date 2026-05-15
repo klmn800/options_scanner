@@ -455,6 +455,18 @@ def ingest_from_email(dry_run=False, quiet=False):
         stats['errors'] += 1
         return stats
 
+    # Probe auth non-interactively. If the token is missing/revoked, skip cleanly
+    # rather than counting it as an error (orchestrator doesn't have a TTY to
+    # complete an OAuth browser flow).
+    if not reader.authenticate(interactive=False):
+        beautiful_log(
+            "Gmail not authenticated — skipping trade ingest. "
+            "Run `python tools/email_reader.py --auth` to re-authenticate.",
+            'warning'
+        )
+        stats['skipped_auth'] = 1
+        return stats
+
     # Search for unread Robinhood execution emails (forwarded)
     query = '(from:account-holder@example.com OR from:noreply@robinhood.com) (subject:"option order" OR subject:"your order") is:unread'
     _log("Searching Gmail: {}".format(query))
