@@ -13,4 +13,4 @@ python agents\trading_advisor\launcher.py --prompt PROMPT_RESEARCH.md --prepare-
 
 REM Step 2: Launch Claude Code in a visible window
 cd /d E:\options_scanner\agents\trading_advisor
-start "Trading Advisor Research" cmd /k "claude --permission-mode bypassPermissions @.session_prompt.md"
+start "Trading Advisor Research" cmd /k "claude --permission-mode auto @.session_prompt.md"

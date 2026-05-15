@@ -15,7 +15,7 @@ An autonomous Claude Code session that audits data quality, investigates pipelin
 ```bash
 # Launch interactive session (Ben watches in real-time)
 cd /d E:\options_scanner\agents\system_analyst
-claude --permission-mode bypassPermissions @PROMPT.md
+claude --permission-mode auto @PROMPT.md
 
 # Or via launcher (handles date injection)
 python agents/system_analyst/launcher.py

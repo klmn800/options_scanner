@@ -9,4 +9,4 @@ python agents\trading_advisor\launcher.py --prompt PROMPT_SUNDAY.md --prepare-on
 
 REM Step 2: Launch Claude Code in a visible window from agent workspace
 cd /d E:\options_scanner\agents\trading_advisor
-start "Trading Advisor (Sunday)" cmd /k "claude --permission-mode bypassPermissions @.session_prompt.md"
+start "Trading Advisor (Sunday)" cmd /k "claude --permission-mode auto @.session_prompt.md"

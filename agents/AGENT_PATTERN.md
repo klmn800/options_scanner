@@ -204,7 +204,7 @@ claude
 ```batch
 @echo off
 cd /d E:\options_scanner\agents\{agent_name}
-claude --permission-mode bypassPermissions @PROMPT.md
+claude --permission-mode auto @PROMPT.md
 ```
 
 ### Scheduling Options
