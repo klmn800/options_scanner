@@ -5,6 +5,15 @@
 **Date:** 2025-10-28
 **Status:** Ready for production deployment
 
+> **⚠️ HISTORICAL DOCUMENT — not current state.** This checklist describes the original migration to sector-based archiving in 2025-10. The tier policy has since evolved (notably P028 in 2026-05-15 cut tier1 to 7d, migrated summary tables to tier3 with 300d override, and added `flow_daily_aggregates`).
+>
+> For current tier policy, see:
+> - `data/health/db_archive_sector.py` (canonical — `TIER_POLICIES` dict + module docstring)
+> - `data/sector_archive/README.md` (archive consumer view)
+> - `data/health/DATABASE_HEALTH_WORKFLOWS.md` (workflow context)
+>
+> Use this file only as a historical record of how sector archiving was originally introduced.
+
 ---
 
 ## Pre-Migration Verification

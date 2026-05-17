@@ -122,15 +122,19 @@ System maintains **two backup files** and **sector-based archives** for redundan
 
 **Archives (Friday nights only):**
 3. **Sector Archives** (`data/sector_archive/{sector}.db`)
-   - Three-tier retention strategy (15d/30d/90d)
-   - Routes data by symbol sector (airlines, technology, etc.)
-   - Runs Friday 6:30 PM → Monday 5:45 AM cutoff
-   - See `data/sector_archive/MIGRATION_CHECKLIST.md` for details
+   - Three-tier retention strategy (7d / 30d / 90d default + 300d per-table override for summary tables)
+   - Routes data by symbol via `symbol_metadata.archive_db`
+   - Runs Friday evening within 59-hour Monday-morning cutoff
+   - **Canonical tier policy:** `data/health/db_archive_sector.py` module docstring + `TIER_POLICIES` dict (~line 282). Other docs mirror it.
+   - Workflow detail: `data/health/DATABASE_HEALTH_WORKFLOWS.md`
+   - Archive consumer view: `data/sector_archive/README.md`
 
-**Archive Tiers:**
-- **Tier 1 (15d):** `flow_options_scans` (MOVE), `flow_alerts` (COPY — kept in production)
-- **Tier 2 (30d MOVE):** `option_contracts`, `option_symbol_summary`, `flow_symbol_summary`
-- **Tier 3 (90d COPY):** Reference data (prices, earnings, news, market)
+**Archive Tiers (post-P028, 2026-05-15):**
+- **Tier 1 (7d MOVE):** `flow_options_scans` (MOVE), `flow_alerts` (COPY override — kept in production)
+- **Tier 2 (30d MOVE):** `option_contracts` only (hybrid expired-OR-old logic)
+- **Tier 3 (COPY mode):**
+  - 90d default: `historical_prices` (skip_cleanup), `earnings_events` (skip_cleanup), `news_symbol_sentiment`, `news_articles`, `market_daily_summary`
+  - 300d override: `option_symbol_summary`, `flow_symbol_summary`, `flow_daily_aggregates`
 
 **Recovery scenarios:**
 - Recent data loss → restore from `datalake_backup.db` (yesterday)
@@ -144,7 +148,7 @@ System maintains **two backup files** and **sector-based archives** for redundan
 ```bash
 # Sector-based archiving (active system - runs automatically Friday nights)
 python data/health/db_archive_sector.py --all-tiers        # All 3 tiers
-python data/health/db_archive_sector.py --tier 1           # Just Tier 1 (15-day)
+python data/health/db_archive_sector.py --tier 1           # Just Tier 1 (7-day)
 python data/health/db_archive_sector.py --dry-run          # Analysis only
 python data/health/db_archive_sector.py --test-mode        # Airlines only
 

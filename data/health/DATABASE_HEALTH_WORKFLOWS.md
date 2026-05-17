@@ -2,7 +2,9 @@
 
 This document shows the complete database health, backup, sync, and archive operations that run throughout the daily cycle.
 
-**Last Updated:** 2025-11-17
+**Last Updated:** 2026-05-16 (P028 — tier retention rework)
+
+> **Canonical archive tier policy:** the authoritative source is the `TIER_POLICIES` dict and module docstring at the top of `data/health/db_archive_sector.py`. This doc mirrors that policy for operational context; when in doubt, trust the script.
 
 ```mermaid
 flowchart TD
@@ -49,7 +51,7 @@ flowchart TD
     FridayEarnings --> Archive[Database Archive<br/>db_archive_sector.py]
 
     Archive --> ArchiveInit[Initialize Archive<br/>59-hour timeout window]
-    ArchiveInit --> Tier1[Tier 1: 15-day MOVE<br/>flow_options_scans, flow_alerts]
+    ArchiveInit --> Tier1[Tier 1: 7-day MOVE<br/>flow_options_scans, flow_alerts]
 
     Tier1 --> Tier1Route[Route by Symbol Sector<br/>→ sector_archive/airlines.db<br/>→ sector_archive/technology.db<br/>etc.]
     Tier1Route --> Tier1Mode{Copy or<br/>Move?}
@@ -58,13 +60,13 @@ flowchart TD
     Tier1Mode -->|flow_options_scans: MOVE| Tier1Move[INSERT to archive<br/>DELETE from production]
 
     Tier1Copy --> Tier2
-    Tier1Move --> Tier2[Tier 2: 30-day MOVE<br/>option_contracts, summaries]
+    Tier1Move --> Tier2[Tier 2: 30-day MOVE<br/>option_contracts only]
 
-    Tier2 --> Tier2Route[Route by Symbol Sector<br/>3 tables moved]
+    Tier2 --> Tier2Route[Route by Symbol Sector<br/>1 table, hybrid logic]
     Tier2Route --> Tier2Hybrid{option_contracts<br/>Hybrid?}
 
     Tier2Hybrid -->|Expired OR Old| Tier2Archive[Archive expired contracts<br/>OR trade_date > 30d]
-    Tier2Hybrid -->|Keep| Tier3[Tier 3: 90-day COPY<br/>Reference data]
+    Tier2Hybrid -->|Keep| Tier3[Tier 3: COPY mode<br/>90d default + 300d per-table override<br/>for summary tables]
 
     Tier2Archive --> Tier3
 
@@ -141,7 +143,7 @@ flowchart TD
 ### Archive Files
 - **sector_archive/{sector}.db**: Sector-specific archives
   - Sectors: airlines, technology, financial, energy, healthcare, etc.
-  - Three-tier retention (15d/30d/90d)
+  - Three-tier retention (7d / 30d / 90d default + 300d override for summary tables)
   - Created Friday nights, updated incrementally
 
 ## Workflow Details
@@ -215,53 +217,65 @@ python data/health/db_archive_sector.py --all-tiers
 - **Cutoff**: Monday 5:45 AM
 - **Purpose**: Allow archive to run over weekend without blocking Monday operations
 
-**Three-Tier Retention Strategy:**
+**Three-Tier Retention Strategy** (canonical: `db_archive_sector.py` `TIER_POLICIES` dict, ~line 282):
 
-#### Tier 1 (15-day retention)
+#### Tier 1 (7-day retention, MOVE default)
 **Tables:**
-- `flow_options_scans` (MOVE - delete from production)
-- `flow_alerts` (COPY - keep in production)
+- `flow_options_scans` (MOVE — delete from production after archive)
+- `flow_alerts` (table-level `mode='copy'` override — kept in production)
 
-**Routing:** By symbol sector
-**Cutoff:** Data older than 15 days
+**Routing:** By symbol sector via `symbol_metadata.archive_db`
+**Cutoff:** Data older than 7 days
 
-**Special Case - flow_alerts:**
-- Table-level override: COPY mode (not MOVE)
-- Reason: Keep alerts in production for performance tracking
+**Why 7d:** P028 (2026-05-15) cut from 15d→7d after FM baseline generator was decoupled from raw scan retention via `flow_daily_aggregates` pre-materialization. TA confirmed never needing more than 2-day raw scan lookback.
+
+**Special Case — flow_alerts:**
+- Table-level `mode='copy'` override skips the tier1 DELETE pass
+- Reason: Keep alerts in production for performance tracking, profitability resolution
 - Still archived to sectors for historical analysis
 
-#### Tier 2 (30-day retention)
+#### Tier 2 (30-day retention, MOVE)
 **Tables:**
-- `option_contracts` (MOVE - with hybrid strategy)
-- `option_symbol_summary` (MOVE)
-- `flow_symbol_summary` (MOVE)
+- `option_contracts` (MOVE — with hybrid strategy)
+
+**Note:** Summary tables `option_symbol_summary` and `flow_symbol_summary` were migrated from Tier 2 to Tier 3 with 300-day retention override in P028.
 
 **Routing:** By symbol sector
-**Cutoff:** Data older than 30 days
+**Cutoff:** Data older than 30 days (with hybrid override)
 
-**Hybrid Strategy - option_contracts:**
+**Hybrid Strategy — option_contracts:**
 - Archive if: `expired OR trade_date > 30 days`
 - Keeps unexpired contracts longer
-- Smart money: contracts expiring in 60+ days stay in production even if 35 days old
+- Contracts expiring in 60+ days stay in production even if 35 days old
 
-#### Tier 3 (90-day retention - COPY mode)
-**Tables:**
-- `historical_prices` (COPY)
-- `earnings_events` (COPY)
+#### Tier 3 (90-day default, COPY mode, with per-table retention_days_override)
+**Tables (90-day default retention):**
+- `historical_prices` (COPY — `skip_cleanup: True`, retained indefinitely in production)
+- `earnings_events` (COPY — `skip_cleanup: True`, retained indefinitely in production)
 - `news_symbol_sentiment` (COPY)
-- `news_articles` (COPY - multi-sector routing)
-- `market_daily_summary` (COPY - all sectors)
+- `news_articles` (COPY — multi-sector routing)
+- `market_daily_summary` (COPY — all sectors)
+
+**Tables with `retention_days_override: 300` (P028 additions):**
+- `option_symbol_summary` (COPY, 300d) — migrated from Tier 2
+- `flow_symbol_summary` (COPY, 300d) — migrated from Tier 2
+- `flow_daily_aggregates` (COPY, 300d) — new table backing FM baseline generation
 
 **Routing Strategies:**
 - **Symbol-based**: Route to one sector per symbol
-- **All sectors**: Copy to EVERY sector archive (market_daily_summary)
-- **Multi-symbol**: Parse JSON array, route to multiple sectors (news_articles)
+- **All sectors**: Copy to EVERY sector archive (`market_daily_summary`)
+- **Multi-symbol**: Parse JSON array, route to multiple sectors (`news_articles`)
 
 **COPY Mode:**
 - Data inserted into archives
-- Data remains in production
-- Separate cleanup pass can delete later (not yet implemented)
-- Reason: Reference data needed for cross-analysis
+- Data remains in production until the per-table retention cutoff
+- `cleanup_tier3_production` deletes rows older than each table's effective retention
+- `skip_cleanup: True` short-circuits cleanup for reference tables that must remain in production
+
+**Per-table retention_days_override plumbing (P028, 5 sites in `db_archive_sector.py`):**
+- Tier1/2/3 dispatchers each call `table_config.get('retention_days_override', tier_config['retention_days'])`
+- `cleanup_tier3_production` reads the override per-iteration inside the per-table loop (after the `skip_cleanup` short-circuit)
+- `analyze_archive_impact` (dry-run) uses the override for cutoff calculation while keeping tier-level retention_days for the banner/stats header
 
 **Sector Routing Logic:**
 ```
@@ -411,14 +425,15 @@ Friday Evening:
 - All tables in datalake_query.db (complete replacement)
 
 **Archive (to sector archives):**
-- **Tier 1**: flow_options_scans, flow_alerts
-- **Tier 2**: option_contracts, option_symbol_summary, flow_symbol_summary
-- **Tier 3**: historical_prices, earnings_events, news_*, market_daily_summary
+- **Tier 1** (7d): flow_options_scans, flow_alerts
+- **Tier 2** (30d): option_contracts (hybrid expired-OR-old)
+- **Tier 3** (90d default): historical_prices, earnings_events, news_*, market_daily_summary
+- **Tier 3** (300d override): option_symbol_summary, flow_symbol_summary, flow_daily_aggregates
 
-**Production DELETE (MOVE mode only):**
-- **Tier 1**: flow_options_scans (flow_alerts kept)
-- **Tier 2**: All 3 tables (option_contracts has hybrid logic)
-- **Tier 3**: None (COPY mode - no deletes yet)
+**Production DELETE (MOVE mode only, or COPY tier3 cleanup):**
+- **Tier 1**: flow_options_scans (flow_alerts kept via mode='copy' override)
+- **Tier 2**: option_contracts (hybrid logic)
+- **Tier 3**: All except `historical_prices` and `earnings_events` (both have `skip_cleanup: True`). Summary tables and `flow_daily_aggregates` cleanup at 300d; news/market_daily_summary at 90d.
 
 ---
 

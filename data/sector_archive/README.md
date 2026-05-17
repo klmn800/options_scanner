@@ -49,22 +49,35 @@ Archives are **updated every Friday night** by `data/health/db_archive_sector.py
 
 ## How Archives Get Updated
 
-The Friday night archive process (`db_archive_sector.py`) runs a three-tier retention strategy:
+The Friday night archive process (`db_archive_sector.py`) runs a three-tier retention strategy.
 
-### Tier 1 - High-Frequency Flow Data (15-day retention)
-- **Tables:** `flow_options_scans` (MOVE), `flow_alerts` (COPY)
+> **Canonical policy:** the authoritative tier definitions live in the `TIER_POLICIES` dict (and module docstring) at the top of `data/health/db_archive_sector.py`. This README mirrors that for archive consumers; if it ever drifts, trust the script.
+
+### Tier 1 - High-Frequency Flow Data (7-day retention)
+- **Tables:** `flow_options_scans` (MOVE), `flow_alerts` (COPY via table-level override)
 - MOVE = deleted from production after archiving
-- COPY = kept in production for ongoing reporting
+- COPY = kept in production for ongoing reporting (flow_alerts only)
+- Retention cut 15→7d in P028 (2026-05-15) after FM baseline gen was decoupled from raw scans
 
-### Tier 2 - Daily Summaries (30-day retention)
-- **Tables:** `option_contracts` (MOVE), `option_symbol_summary` (MOVE), `flow_symbol_summary` (MOVE)
-- `option_contracts` has hybrid logic: archives if expired OR older than 30 days
+### Tier 2 - Daily Contracts (30-day retention)
+- **Tables:** `option_contracts` (MOVE, with hybrid expired-OR-old logic)
+- Summary tables `option_symbol_summary` and `flow_symbol_summary` were migrated to Tier 3 in P028
 
-### Tier 3 - Reference Data (90-day retention)
-- **Tables:** `historical_prices`, `earnings_events`, `news_symbol_sentiment`, `news_articles`, `market_daily_summary`
-- COPY mode - data stays in production, also copied to archives
-- `market_daily_summary` copied to ALL sector archives (market-wide context)
-- `news_articles` routed by `symbols_mentioned` JSON parsing (multi-sector)
+### Tier 3 - Reference & Summary Data (COPY mode)
+
+**Default 90-day retention:**
+- `historical_prices` (`skip_cleanup: True` — retained indefinitely in production)
+- `earnings_events` (`skip_cleanup: True` — retained indefinitely in production)
+- `news_symbol_sentiment`
+- `news_articles` (multi-sector routing via `symbols_mentioned` JSON parse)
+- `market_daily_summary` (copied to ALL sector archives — market-wide context)
+
+**Per-table `retention_days_override: 300` (P028 additions):**
+- `option_symbol_summary` — migrated from Tier 2
+- `flow_symbol_summary` — migrated from Tier 2
+- `flow_daily_aggregates` — new table backing FM baseline generation
+
+COPY mode means data is inserted into archives and remains in production until each table's effective retention cutoff. `cleanup_tier3_production` reads `retention_days_override` per-table and skips tables with `skip_cleanup: True`.
 
 ### Routing
 Symbols are routed to sector archives based on `symbol_metadata.archive_db`. This column is set manually (Admin TUI or SQL) and preserved across daily metadata refreshes.

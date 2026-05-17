@@ -4,17 +4,27 @@ Sector-Based Database Archiver (db_archive_sector.py)
 ------------------------------------------------------
 Three-tier retention policy archiving to sector-specific databases.
 
-Tier 1 (15d, MOVE): flow_options_scans
-Tier 2 (30d, MOVE): option_contracts, option_symbol_summary, flow_symbol_summary
-Tier 3 (90d, COPY): Reference data (prices, earnings, news, market)
+Tier 1 (7d, MOVE):  flow_options_scans, flow_alerts (COPY override — kept in prod)
+Tier 2 (30d, MOVE): option_contracts (hybrid: expired OR older than 30d)
+Tier 3 (90d, COPY): Reference data (historical_prices, earnings_events, news_*,
+                    market_daily_summary) AND, with per-table 300d
+                    retention_days_override: option_symbol_summary,
+                    flow_symbol_summary, flow_daily_aggregates
 
-Routes data to data/sector_archive/{sector}.db based on symbol sector.
+P028 (2026-05-15): tier1 retention cut 15→7d, summary tables migrated tier2→tier3
+with 300d override, new flow_daily_aggregates table added to tier3, and
+per-table `retention_days_override` plumbing added at 5 sites (tier1/2/3
+dispatchers, cleanup_tier3_production, analyze_archive_impact).
+
+Routes data to data/sector_archive/{sector}.db based on symbol.archive_db in
+the symbol_metadata table.
 
 Usage:
   python data/health/db_archive_sector.py --all-tiers              # Production run
   python data/health/db_archive_sector.py --tier 1                 # Just Tier 1
   python data/health/db_archive_sector.py --test-mode              # Test on Airlines only
   python data/health/db_archive_sector.py --test-mode --tier 1     # Test Tier 1 on Airlines
+  python data/health/db_archive_sector.py --dry-run                # Analyze impact, no writes
 
 Author: Ben (with assistance from Claude)
 """
