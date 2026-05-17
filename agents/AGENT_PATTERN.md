@@ -1,6 +1,6 @@
 # Agent Pattern Reference
 
-How to build and maintain Claude Code CLI agents in this system. Distilled from the System Analyst (formerly Strategic Advisor) and Trading Advisor — the first two production agents.
+How to build and maintain Claude Code CLI agents in this system. Distilled from the System Analyst, Trading Advisor, and Market Analyst — the three production agents (plus the more narrowly-scoped Earnings Researcher). MA was split out of TA on 2026-05-17 per Proposal 027 (SA/TA/Ben roundtable 2026-05-13): TA shrank to morning + interactive, MA owns evening research + grading. The split introduced a new inter-agent pattern — the **graduation gate** — described below.
 
 ---
 
@@ -172,9 +172,31 @@ No commits required — the repo just needs to exist. The parent `.gitignore` sh
 
 **Rules:**
 - Write guard blocks direct writes to other agents' workspaces
-- Mailbox is the ONLY inter-agent communication channel
+- Mailbox is the ONLY inter-agent communication channel (the graduation gate, below, is the OTHER cross-agent channel — Ben-mediated)
 - Keep messages actionable: "I found X, you should investigate Y"
 - Agent clears/archives messages after processing
+
+### Graduation Gate (MA -> TA, Ben-mediated)
+
+Introduced 2026-05-17 with the MA/TA split. Used when one agent needs to deliver durable reference material (patterns, lessons, mechanics, case studies) to another agent's read-only reference library.
+
+**Flow:**
+1. Source agent (e.g., MA) drafts content with YAML frontmatter in `agents/<source>/reference/staging/<file>.md`. Required keys: `title`, `type`, `hypothesis`, `sample_size`, `hit_rate`, `date_range`, `confidence`, `confidence_rationale`, `session`, `drafted`, `status`, `supersedes`.
+2. Source agent iterates until `status: ready_for_review`, then pings Ben via `notes_for_ben.md`.
+3. Ben runs `python tools/graduate_reference.py <filename>` (or copies manually). Tool copies file into the **target agent's** `reference/`, strips frontmatter, archives staged copy to `staging/promoted/`.
+4. Target agent reads the graduated file in its own `reference/` at session start. Target's write guard blocks the agent from editing its own reference (mechanical enforcement of "Ben is the gate").
+
+**Why a gate and not direct cross-agent writes:**
+- Prevents the source agent from self-promoting findings (calibration discipline)
+- Prevents the target agent from cherry-picking what to internalize (consistency discipline)
+- Ben gets a per-file review checkpoint, with three outcomes: promote / send back with notes / decline
+
+**When to use this pattern vs the mailbox:**
+- Mailbox: transient/actionable signals ("watch for X tomorrow," "noticed Y, worth validating")
+- Graduation: durable knowledge the target agent will rely on across many sessions
+- If the source agent finds itself sending the same calibration nudge weekly, that's a graduation candidate
+
+**When NOT to use:** for system-level changes (schema, pipelines, code), use proposals to the System Analyst instead. The graduation gate is for inter-agent knowledge transfer, not engineering work orders.
 
 ### Agent -> Developer (Us)
 

@@ -50,6 +50,7 @@ plans/
 # Autonomous Claude Code agents (workspaces with their own .git repos)
 agents/system_analyst/
 agents/trading_advisor/
+agents/market_analyst/
 agents/earnings_researcher/
 agents/roundtable/
 
