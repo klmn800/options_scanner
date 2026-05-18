@@ -60,7 +60,7 @@ def _ensure_schema(conn):
             action TEXT NOT NULL,
             instrument_type TEXT NOT NULL,
             symbol TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
+            quantity REAL NOT NULL,
             fill_price REAL NOT NULL,
             total_cost REAL,
             option_type TEXT,
@@ -132,8 +132,10 @@ _OPTION_PARTIAL_RE = re.compile(
 # "Your order to buy 2 shares of RNMBY through your individual (***1763)
 #  account was executed at an average price of $316.75 on March 27, 2026 at
 #  2:51 PM ET."
+# Quantity accepts fractional values (e.g., "0.75 shares") from Robinhood
+# fractional-share buys/sells.
 _STOCK_EXECUTED_RE = re.compile(
-    r'Your (?:limit |market )?order to (buy|sell) (\d+) shares? of '
+    r'Your (?:limit |market )?order to (buy|sell) (\d+(?:\.\d+)?) shares? of '
     r'(\w+) (?:through|in) your.*?account (?:was executed|executed) at an average price of '
     r'\$([0-9,.]+) on '
     r'(\w+ \d{1,2}, \d{4}) at (\d{1,2}:\d{2} [AP]M) ET',
@@ -332,7 +334,7 @@ def parse_email(body, msg_id=None):
     match = _STOCK_EXECUTED_RE.search(text_normalized)
     if match:
         action = match.group(1).lower()
-        qty = int(match.group(2))
+        qty = float(match.group(2))
         symbol = match.group(3).upper()
         fill_price = float(match.group(4).replace(',', ''))
         date_str = match.group(5)
@@ -529,13 +531,13 @@ def ingest_from_email(dry_run=False, quiet=False):
 
                 # Display what we found
                 if ex['instrument_type'] == 'option':
-                    desc = "{} {} {} ${} {} {} @ ${:.2f}/sh (${:.2f} total)".format(
+                    desc = "{} {:g} {} ${} {} {} @ ${:.2f}/sh (${:.2f} total)".format(
                         ex['action'].upper(), ex['quantity'],
                         ex['symbol'], ex['strike'], ex['option_type'],
                         ex['expiration_date'], ex['fill_price'], ex['total_cost']
                     )
                 else:
-                    desc = "{} {} {} @ ${:.2f} (${:.2f} total)".format(
+                    desc = "{} {:g} {} @ ${:.2f} (${:.2f} total)".format(
                         ex['action'].upper(), ex['quantity'],
                         ex['symbol'], ex['fill_price'], ex['total_cost']
                     )
@@ -688,7 +690,8 @@ def main():
                         help='Option type (for --manual, options only)')
     parser.add_argument('--strike', type=float, help='Strike price (for --manual, options only)')
     parser.add_argument('--expiry', type=str, help='Expiration date YYYY-MM-DD (for --manual, options only)')
-    parser.add_argument('--qty', type=int, help='Quantity (for --manual)')
+    parser.add_argument('--qty', type=float,
+                        help='Quantity (for --manual). Fractional allowed for stock.')
     parser.add_argument('--price', type=float, help='Fill price per share (for --manual)')
 
     args = parser.parse_args()

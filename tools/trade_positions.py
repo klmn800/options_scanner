@@ -90,7 +90,7 @@ def _ensure_schema(conn):
             strike REAL,
             option_type TEXT,
             expiration_date DATE,
-            net_qty INTEGER NOT NULL,
+            net_qty REAL NOT NULL,
             avg_buy_price REAL,
             total_cost REAL,
             opened_at DATETIME,
@@ -633,9 +633,9 @@ def _aggregate_executions(conn, position_key):
         notes_concat = "\n".join(lines)
 
     return {
-        'net_qty': int(row[0]),
+        'net_qty': float(row[0]),
         'buy_total_value': row[1] or 0.0,
-        'buy_total_qty': int(row[2] or 0),
+        'buy_total_qty': float(row[2] or 0),
         'net_total_cost': row[3],
         'opened_at': row[4],
         'last_action_at': row[5],
