@@ -89,21 +89,18 @@ def _update_database(db_path, old_symbol, new_symbol, db_label):
     return results
 
 
-def rename_symbol(old_symbol, new_symbol, db_path):
+def rename_symbol(old_symbol, new_symbol, db_path, *, no_interaction=False, force=False):
     """Rename a symbol across the entire database ecosystem.
-
-    Steps:
-      1. Validate old symbol exists, warn if new symbol already exists
-      2. Show current info and prompt for confirmation
-      3. Dynamically discover and UPDATE all tables with 'symbol' columns
-         in datalake.db, performance.db, query DB, and sector archive
-      4. Append rename note to symbol_metadata
-      5. Log lifecycle event
 
     Args:
         old_symbol: Current ticker (already uppercased)
         new_symbol: New ticker (already uppercased)
         db_path: Path to datalake.db
+        no_interaction: If True, skip prompts.
+        force: Under no_interaction, override the "target symbol already exists" guard.
+
+    Returns:
+        bool: True if renamed, False on validation failure or cancellation.
     """
     # --- Validation ---
     with sqlite3.connect(db_path, timeout=30.0) as conn:
@@ -115,7 +112,7 @@ def rename_symbol(old_symbol, new_symbol, db_path):
 
         if not old_row:
             print(f'\n  {old_symbol} not found in symbol_metadata.')
-            return
+            return False
 
         new_row = conn.execute(
             'SELECT symbol, universe_tier, sector, company_name '
@@ -128,11 +125,16 @@ def rename_symbol(old_symbol, new_symbol, db_path):
             print(f'    Company: {new_row["company_name"] or "N/A"}')
             print(f'    Tier:    {new_row["universe_tier"]}')
             print(f'    Sector:  {new_row["sector"] or "N/A"}')
-            if not prompt_yes_no(
-                f'  {new_symbol} already exists. Continue anyway?', default='n'
-            ):
-                print('  Cancelled.')
-                return
+            if no_interaction:
+                if not force:
+                    print(f'\n  ERROR: {new_symbol} already exists. Pass --force to proceed.')
+                    return False
+            else:
+                if not prompt_yes_no(
+                    f'  {new_symbol} already exists. Continue anyway?', default='n'
+                ):
+                    print('  Cancelled.')
+                    return False
 
     # --- Show info ---
     name = old_row['company_name'] or old_symbol
@@ -150,9 +152,12 @@ def rename_symbol(old_symbol, new_symbol, db_path):
     if archive_db:
         print(f'  Archive:   {archive_db}')
 
-    if not prompt_yes_no(f'  Proceed with rename {old_symbol} -> {new_symbol}?'):
-        print('  Cancelled.')
-        return
+    operator = 'automation' if no_interaction else 'human'
+
+    if not no_interaction:
+        if not prompt_yes_no(f'  Proceed with rename {old_symbol} -> {new_symbol}?'):
+            print('  Cancelled.')
+            return False
 
     # --- Build database list ---
     data_dir = os.path.dirname(db_path)
@@ -215,7 +220,7 @@ def rename_symbol(old_symbol, new_symbol, db_path):
         event_type='renamed',
         tier=current_tier,
         reason=f'Renamed from {old_symbol}',
-        operator='human',
+        operator=operator,
         metadata_dict=event_meta
     )
 
@@ -223,3 +228,4 @@ def rename_symbol(old_symbol, new_symbol, db_path):
     print(f'\n  Done: {old_symbol} -> {new_symbol}')
     print(f'  {total_updated:,} total rows updated across {len(databases)} databases')
     print(f'  Lifecycle event logged')
+    return True

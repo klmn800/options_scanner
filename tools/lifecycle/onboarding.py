@@ -32,6 +32,7 @@ if project_root not in sys.path:
 from tools.timezone_utils import now_eastern
 from tools.lifecycle.preflight import run_preflight_checks
 from tools.lifecycle.audit import log_lifecycle_event
+from tools.lifecycle.routing import determine_archive_db
 from tools.lifecycle.ui import (
     display_symbol_card, display_preflight_results, display_progress_step,
     prompt_yes_no, prompt_choice, prompt_archive_db,
@@ -389,12 +390,22 @@ def _step_generate_baseline(symbol, tier, db_path):
         return f'fail  ({e})'
 
 
-def onboard_symbol(symbol, db_path):
-    """Full interactive onboarding flow.
+def onboard_symbol(symbol, db_path, *, no_interaction=False, tier=None,
+                   archive_db=None, create_archive=False, force=False):
+    """Onboarding flow — interactive by default, scriptable via no_interaction.
 
     Args:
         symbol: Stock ticker (already uppercased)
         db_path: Path to datalake.db
+        no_interaction: If True, skip all prompts; required values must be passed in.
+        tier: 'fm_universe' or 'daily_only'. Required under no_interaction.
+        archive_db: Archive DB name. Under no_interaction, defaults to
+            determine_archive_db(sector, industry) if not passed.
+        create_archive: Under no_interaction, allow auto-creation of missing archive DBs.
+        force: Override the "already in universe" preflight failure.
+
+    Returns:
+        bool: True if onboarded, False on validation failure or user cancellation.
     """
     symbol = symbol.upper()
 
@@ -411,25 +422,66 @@ def onboard_symbol(symbol, db_path):
     results = run_preflight_checks(symbol, data, db_path)
     display_preflight_results(results)
 
-    # Step 4: Confirm
-    if not prompt_yes_no(f'Add {symbol} to system?'):
-        print('Cancelled.')
-        return
+    operator = 'automation' if no_interaction else 'human'
 
-    # Step 5: Tier selection
-    tier = prompt_choice('Tier assignment:', [
-        ('fm_universe', 'FM_UNIVERSE  (full intraday scan)'),
-        ('daily_only', 'DAILY_ONLY   (OP/EI only)'),
-    ])
-    if tier is None:
-        print('Cancelled.')
-        return
+    if no_interaction:
+        if tier not in ('fm_universe', 'daily_only'):
+            print(f'\nERROR: --tier must be fm_universe or daily_only (got: {tier!r})')
+            return False
 
-    # Step 6: Archive routing
-    archive_db = prompt_archive_db(data['sector'], data['industry'])
-    if not archive_db:
-        print('No archive DB specified. Cancelled.')
-        return
+        not_in_universe = next((r for r in results if r.check_name == 'Not in universe'), None)
+        if not_in_universe and not not_in_universe.passed and not force:
+            print(f'\nERROR: pre-flight blocked: {not_in_universe.message}. Use --force to override.')
+            return False
+
+        if not archive_db:
+            archive_db = determine_archive_db(data['sector'], data['industry'])
+            if not archive_db:
+                print(f'\nERROR: could not auto-route archive DB for sector={data["sector"]!r}. '
+                      f'Pass --archive-db NAME.')
+                return False
+
+        if archive_db.endswith('.db'):
+            archive_db = archive_db[:-3]
+
+        archive_dir = os.path.join(project_root, 'data', 'sector_archive')
+        archive_path = os.path.join(archive_dir, f'{archive_db}.db')
+        if not os.path.exists(archive_path):
+            if not create_archive:
+                print(f'\nERROR: archive {archive_db}.db not found. '
+                      f'Pass --create-archive to create it.')
+                return False
+            try:
+                from data.health.create_sector_archive import create_sector_archive
+                rc = create_sector_archive(archive_db, copy_reference=False, dry_run=False)
+                if rc != 0:
+                    print(f'\nERROR: failed to create archive {archive_db}.db (exit {rc})')
+                    return False
+            except Exception as e:
+                print(f'\nERROR: failed to create archive {archive_db}.db: {e}')
+                return False
+
+        print(f'\n--no-interaction: tier={tier}, archive_db={archive_db}')
+    else:
+        # Step 4: Confirm
+        if not prompt_yes_no(f'Add {symbol} to system?'):
+            print('Cancelled.')
+            return False
+
+        # Step 5: Tier selection
+        tier = prompt_choice('Tier assignment:', [
+            ('fm_universe', 'FM_UNIVERSE  (full intraday scan)'),
+            ('daily_only', 'DAILY_ONLY   (OP/EI only)'),
+        ])
+        if tier is None:
+            print('Cancelled.')
+            return False
+
+        # Step 6: Archive routing
+        archive_db = prompt_archive_db(data['sector'], data['industry'])
+        if not archive_db:
+            print('No archive DB specified. Cancelled.')
+            return False
 
     # Execute onboarding steps
     total_steps = 7
@@ -465,8 +517,8 @@ def onboard_symbol(symbol, db_path):
         symbol=symbol,
         event_type='onboarded',
         tier=tier,
-        reason=f'Interactive onboarding via CLI',
-        operator='human',
+        reason=f'{"Automated" if no_interaction else "Interactive"} onboarding via CLI',
+        operator=operator,
         metadata_dict={
             'sector': data['sector'],
             'industry': data['industry'],
@@ -478,3 +530,4 @@ def onboard_symbol(symbol, db_path):
     display_progress_step(step, total_steps, 'Log lifecycle event', f'done  (event #{event_id})')
 
     print(f'\nOnboarded {symbol}. Event ID: {event_id}')
+    return True

@@ -23,21 +23,17 @@ from tools.lifecycle.audit import (
 from tools.lifecycle.ui import prompt_yes_no, prompt_choice, prompt_text
 
 
-def offboard_symbol(symbol, db_path):
+def offboard_symbol(symbol, db_path, *, no_interaction=False, reason=None):
     """Move a symbol to purgatory (stop all collection).
-
-    Steps:
-      1. Confirm symbol exists and is in fm_universe or daily_only
-      2. Show current status
-      3. Prompt for reason
-      4. UPDATE symbol_metadata SET universe_tier='purgatory'
-      5. DELETE from earnings_upcoming
-      6. Log offboarded event
-      7. Print confirmation
 
     Args:
         symbol: Stock ticker (already uppercased)
         db_path: Path to datalake.db
+        no_interaction: If True, skip prompts; reason must be passed in.
+        reason: Reason text. Required under no_interaction.
+
+    Returns:
+        bool: True if offboarded, False on validation failure or cancellation.
     """
     symbol = symbol.upper()
 
@@ -51,7 +47,7 @@ def offboard_symbol(symbol, db_path):
 
     if not row:
         print(f'Symbol {symbol} not found in symbol_metadata.')
-        return
+        return False
 
     current_tier = row['universe_tier']
     name = row['company_name'] or symbol
@@ -59,15 +55,15 @@ def offboard_symbol(symbol, db_path):
 
     if current_tier == 'purgatory':
         print(f'{symbol} ({name}) is already in purgatory.')
-        return
+        return False
 
     if current_tier == 'removed':
         print(f'{symbol} ({name}) is already removed.')
-        return
+        return False
 
     if current_tier not in ('fm_universe', 'daily_only'):
         print(f'{symbol} ({name}) has unexpected tier: {current_tier}')
-        return
+        return False
 
     # Show current status
     print(f'\n  {symbol} — {name}')
@@ -78,20 +74,23 @@ def offboard_symbol(symbol, db_path):
         print(f'  Protected:     {protected}')
         print(f'  WARNING: This symbol has protected status ({protected}).')
 
-    # Confirm
-    if not prompt_yes_no(f'Offboard {symbol} to purgatory?'):
-        print('Cancelled.')
-        return
+    operator = 'automation' if no_interaction else 'human'
 
-    # Reason
-    reason = prompt_text('Reason for offboarding')
-    if not reason:
-        reason = 'No reason provided'
+    if no_interaction:
+        if not reason:
+            print('\nERROR: --reason is required under --no-interaction')
+            return False
+    else:
+        if not prompt_yes_no(f'Offboard {symbol} to purgatory?'):
+            print('Cancelled.')
+            return False
+        reason = prompt_text('Reason for offboarding')
+        if not reason:
+            reason = 'No reason provided'
 
     today = now_eastern().strftime('%Y-%m-%d')
 
     with sqlite3.connect(db_path, timeout=30.0) as conn:
-        # Update tier
         conn.execute(
             'UPDATE symbol_metadata SET universe_tier = ?, tier_changed_date = ?, '
             'notes = COALESCE(notes || \'; \', \'\') || ? '
@@ -99,7 +98,6 @@ def offboard_symbol(symbol, db_path):
             ('purgatory', today, f'Offboarded {today}: {reason}', symbol)
         )
 
-        # Remove from earnings_upcoming
         cursor = conn.execute(
             'DELETE FROM earnings_upcoming WHERE symbol = ?', (symbol,)
         )
@@ -107,14 +105,13 @@ def offboard_symbol(symbol, db_path):
 
         conn.commit()
 
-    # Log event
     event_id = log_lifecycle_event(
         db_path=db_path,
         symbol=symbol,
         event_type='offboarded',
         tier='purgatory',
         reason=reason,
-        operator='human',
+        operator=operator,
         metadata_dict={
             'previous_tier': current_tier,
             'protected_reason': protected,
@@ -126,21 +123,20 @@ def offboard_symbol(symbol, db_path):
     if earnings_removed:
         print(f'  Removed {earnings_removed} row(s) from earnings_upcoming.')
     print('  Production data will archive naturally on next Friday cycle.')
+    return True
 
 
-def move_tier(symbol, db_path):
-    """Change a symbol's tier between fm_universe and daily_only.
-
-    Steps:
-      1. Confirm symbol exists and is in fm_universe or daily_only
-      2. Show current status and offer the other tier
-      3. Prompt for reason
-      4. UPDATE symbol_metadata
-      5. Log tier_changed event
+def move_tier(symbol, db_path, *, no_interaction=False, reason=None):
+    """Toggle a symbol's tier between fm_universe and daily_only.
 
     Args:
         symbol: Stock ticker (already uppercased)
         db_path: Path to datalake.db
+        no_interaction: If True, skip prompts; reason must be passed in.
+        reason: Reason text. Required under no_interaction.
+
+    Returns:
+        bool: True if tier changed, False on validation failure or cancellation.
     """
     symbol = symbol.upper()
 
@@ -154,7 +150,7 @@ def move_tier(symbol, db_path):
 
     if not row:
         print(f'Symbol {symbol} not found in symbol_metadata.')
-        return
+        return False
 
     current_tier = row['universe_tier']
     name = row['company_name'] or symbol
@@ -162,7 +158,7 @@ def move_tier(symbol, db_path):
 
     if current_tier not in ('fm_universe', 'daily_only'):
         print(f'{symbol} ({name}) is in {current_tier} — use --restore or --offboard instead.')
-        return
+        return False
 
     new_tier = 'daily_only' if current_tier == 'fm_universe' else 'fm_universe'
 
@@ -175,15 +171,19 @@ def move_tier(symbol, db_path):
     if protected:
         print(f'  Protected:     {protected}')
 
-    # Confirm
-    if not prompt_yes_no(f'Move {symbol} from {current_tier} to {new_tier}?'):
-        print('Cancelled.')
-        return
+    operator = 'automation' if no_interaction else 'human'
 
-    # Reason
-    reason = prompt_text('Reason for tier change')
-    if not reason:
-        reason = 'No reason provided'
+    if no_interaction:
+        if not reason:
+            print('\nERROR: --reason is required under --no-interaction')
+            return False
+    else:
+        if not prompt_yes_no(f'Move {symbol} from {current_tier} to {new_tier}?'):
+            print('Cancelled.')
+            return False
+        reason = prompt_text('Reason for tier change')
+        if not reason:
+            reason = 'No reason provided'
 
     today = now_eastern().strftime('%Y-%m-%d')
 
@@ -196,14 +196,13 @@ def move_tier(symbol, db_path):
         )
         conn.commit()
 
-    # Log event
     event_id = log_lifecycle_event(
         db_path=db_path,
         symbol=symbol,
         event_type='tier_changed',
         tier=new_tier,
         reason=reason,
-        operator='human',
+        operator=operator,
         metadata_dict={
             'previous_tier': current_tier,
             'new_tier': new_tier,
@@ -217,21 +216,20 @@ def move_tier(symbol, db_path):
     else:
         print('  Symbol will now be included in FM intraday scans.')
         print('  Tip: FM baseline will update automatically on next Friday cycle.')
+    return True
 
 
-def restore_symbol(symbol, db_path):
+def restore_symbol(symbol, db_path, *, no_interaction=False, tier=None):
     """Restore a symbol from purgatory back to active universe.
-
-    Steps:
-      1. Confirm symbol is in purgatory
-      2. Prompt for tier (fm_universe or daily_only)
-      3. UPDATE symbol_metadata
-      4. Log purgatory_restored event
-      5. Print confirmation
 
     Args:
         symbol: Stock ticker (already uppercased)
         db_path: Path to datalake.db
+        no_interaction: If True, skip prompts; tier must be passed in.
+        tier: 'fm_universe' or 'daily_only'. Required under no_interaction.
+
+    Returns:
+        bool: True if restored, False on validation failure or cancellation.
     """
     symbol = symbol.upper()
 
@@ -245,14 +243,14 @@ def restore_symbol(symbol, db_path):
 
     if not row:
         print(f'Symbol {symbol} not found in symbol_metadata.')
-        return
+        return False
 
     current_tier = row['universe_tier']
     name = row['company_name'] or symbol
 
     if current_tier != 'purgatory':
         print(f'{symbol} ({name}) is not in purgatory (current tier: {current_tier}).')
-        return
+        return False
 
     # Show current info
     print(f'\n  {symbol} — {name}')
@@ -261,19 +259,23 @@ def restore_symbol(symbol, db_path):
     if row['notes']:
         print(f'  Notes:     {row["notes"]}')
 
-    # Confirm
-    if not prompt_yes_no(f'Restore {symbol} from purgatory?'):
-        print('Cancelled.')
-        return
+    operator = 'automation' if no_interaction else 'human'
 
-    # Tier selection
-    tier = prompt_choice('Restore to which tier:', [
-        ('fm_universe', 'FM_UNIVERSE  (full intraday scan)'),
-        ('daily_only', 'DAILY_ONLY   (OP/EI only)'),
-    ])
-    if tier is None:
-        print('Cancelled.')
-        return
+    if no_interaction:
+        if tier not in ('fm_universe', 'daily_only'):
+            print(f'\nERROR: --tier must be fm_universe or daily_only (got: {tier!r})')
+            return False
+    else:
+        if not prompt_yes_no(f'Restore {symbol} from purgatory?'):
+            print('Cancelled.')
+            return False
+        tier = prompt_choice('Restore to which tier:', [
+            ('fm_universe', 'FM_UNIVERSE  (full intraday scan)'),
+            ('daily_only', 'DAILY_ONLY   (OP/EI only)'),
+        ])
+        if tier is None:
+            print('Cancelled.')
+            return False
 
     today = now_eastern().strftime('%Y-%m-%d')
 
@@ -285,14 +287,13 @@ def restore_symbol(symbol, db_path):
         )
         conn.commit()
 
-    # Log event
     event_id = log_lifecycle_event(
         db_path=db_path,
         symbol=symbol,
         event_type='purgatory_restored',
         tier=tier,
         reason=f'Restored from purgatory to {tier}',
-        operator='human',
+        operator=operator,
         metadata_dict={
             'previous_tier': 'purgatory',
         }
@@ -303,6 +304,7 @@ def restore_symbol(symbol, db_path):
     if tier == 'fm_universe':
         print('  Tip: Run `python tools/symbol_lifecycle.py --add ' + symbol +
               '` to regenerate FM baseline if needed.')
+    return True
 
 
 def list_universe(db_path):

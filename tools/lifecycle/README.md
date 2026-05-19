@@ -7,13 +7,47 @@ CLI tool and package for managing the KLMN symbol universe: onboarding, offboard
 ## Quick Reference
 
 ```bash
-python tools/symbol_lifecycle.py --add ACME       # Onboard new symbol
-python tools/symbol_lifecycle.py --offboard ACME  # Move to purgatory
-python tools/symbol_lifecycle.py --restore ACME   # Restore from purgatory
-python tools/symbol_lifecycle.py --rename PSTG P  # Rename ticker across all DBs
-python tools/symbol_lifecycle.py --list           # Universe dashboard
-python tools/symbol_lifecycle.py --review         # Review pending suspects
+python tools/symbol_lifecycle.py --add ACME        # Onboard new symbol
+python tools/symbol_lifecycle.py --offboard ACME   # Move to purgatory
+python tools/symbol_lifecycle.py --restore ACME    # Restore from purgatory
+python tools/symbol_lifecycle.py --move-tier ACME  # Toggle fm_universe <-> daily_only
+python tools/symbol_lifecycle.py --rename PSTG P   # Rename ticker across all DBs
+python tools/symbol_lifecycle.py --list            # Universe dashboard
+python tools/symbol_lifecycle.py --review          # Review pending suspects
 ```
+
+## Non-Interactive Mode (`--no-interaction`)
+
+Every capability except `--review` supports a non-interactive workflow for agents and scripts. All confirms are auto-accepted; required values must be supplied via flags or the run fails with exit code 1 before any DB writes.
+
+```bash
+# Onboard. --archive-db auto-routes from sector/industry if omitted.
+# --create-archive lets the run create a missing archive DB.
+# --force overrides the "already in universe" pre-flight failure.
+python tools/symbol_lifecycle.py --add ACME --no-interaction \
+    --tier fm_universe --archive-db technology
+
+# Offboard. --reason is required.
+python tools/symbol_lifecycle.py --offboard ACME --no-interaction \
+    --reason "delisted 2026-05-19"
+
+# Restore from purgatory. --tier is required.
+python tools/symbol_lifecycle.py --restore ACME --no-interaction \
+    --tier daily_only
+
+# Toggle tier. --reason is required.
+python tools/symbol_lifecycle.py --move-tier ACME --no-interaction \
+    --reason "moving to daily_only after liquidity drop"
+
+# Rename. --force needed if the new ticker already exists.
+python tools/symbol_lifecycle.py --rename PSTG P --no-interaction
+```
+
+**Exit codes:** `0` success, `1` capability failure (validation error, symbol-state mismatch, sub-step failure), `2` invalid invocation (e.g., `--review --no-interaction`).
+
+**Audit trail:** Lifecycle events logged under `--no-interaction` record `operator='automation'` (vs `'human'` for interactive runs).
+
+**`--review` is interactive-only by design** — per-suspect triage with four possible actions per row doesn't have a safe non-interactive equivalent. Agents should call `--list` to view pending suspects and `--offboard SYMBOL --no-interaction --reason ...` to act on individual ones.
 
 ## Onboarding (`--add`)
 
