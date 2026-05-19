@@ -92,17 +92,24 @@ python tools/twitter_post_alert.py --latest --dry-run         # preview most rec
 python tools/twitter_test_post.py                             # X API auth smoke test
 
 # Paper Trading (Tradier sandbox — full ref: docs/paper_trading/README.md)
+# DB: data/paper.db (Phase B moved out of datalake.db). Use --db data/paper.db for direct_db_query.
 python tools/paper_trade.py --balance                                          # sandbox balance
 python tools/paper_trade.py --open --instrument option --symbol SPY \
     --option-symbol SPY260619C00500000 --side buy_to_open --qty 1 \
-    --type market --tag manual_test                                            # submit option order
+    --type market --tag manual_test                                            # unmonitored open
 python tools/paper_trade.py --open --instrument stock --symbol SPY \
-    --side buy --qty 10 --type market --tag manual_test                        # submit equity order
+    --side buy --qty 10 --type market --tag manual_test \
+    --tp 25 --sl -30 --max-hold 5                                              # MONITORED open
+python tools/paper_trade.py --update-conditions --position-id N \
+    --tp 30 --sl -25                                                           # retrofit/adjust conditions
+python tools/paper_trade.py --update-conditions --position-id N --clear        # back to unmonitored
 python tools/paper_poll.py                                                     # record any new fills
 python tools/paper_poll.py --snapshot                                          # daily balance row
-python tools/paper_trade.py --positions [--tag T] [--include-closed]           # list positions
-python tools/paper_trade.py --close --position-id N [--reason manual]          # close a position
+python tools/paper_trade.py --positions [--tag T] [--include-closed]           # list positions (shows conditions col)
+python tools/paper_trade.py --close --position-id N [--reason manual]          # manual close
 python tools/paper_trade.py --pnl [--tag T] [--since YYYY-MM-DD]               # realized P&L by tag
+python tools/paper_close_engine.py --dry-run --verbose                         # Phase B engine, safe test
+python tools/paper_close_engine.py                                             # Phase B engine, live
 ```
 
 **Agents, email tools, analysis tools, archiving commands:** See `docs/CLAUDE_REFERENCE.md`.

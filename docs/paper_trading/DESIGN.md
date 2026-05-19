@@ -1,7 +1,7 @@
 # Paper Trading Platform — Design Document
 
-> **Status:** State A COMPLETE 2026-05-19 (acceptance test passed end-to-end). Source of truth across sessions — update when decisions change.
-> **Current phase:** State A complete. Next target: **State B (Engine-Managed Exits)**.
+> **Status:** State A COMPLETE 2026-05-19. State B IMPLEMENTED 2026-05-19 (acceptance test pending). Source of truth across sessions — update when decisions change.
+> **Current phase:** State B implementation complete. Next target: **State C (First Auto-Open Consumer — FM Alerts)**.
 > **Date drafted:** 2026-05-18
 > **Participants:** Ben, Claude
 
@@ -37,11 +37,14 @@ Each is a coherent stopping point. The work to reach each one has standalone val
 - Operational reference: [`README.md`](README.md).
 
 ### B. Engine-Managed Exits
-- Each `paper_positions` row carries a `close_conditions` block (`take_profit_pct`, `stop_loss_pct`, `max_hold_days`).
-- A reconciliation engine evaluates open positions each cycle, fires closing orders when conditions trip.
-- Hooks into FM cycle (~15 min cadence) and a daily pass for time-based exits.
-- **Open is still manual; close is automatic.**
-- Default conditions: +25% take profit, -30% stop loss, 5-day max hold.
+- Each `paper_positions` row optionally carries a `close_conditions` block. **NULL by default** — manual `--open` without explicit condition flags creates an unmonitored position the engine ignores. Auto-consumers in C+ supply conditions explicitly.
+- Vocabulary (v1, all stateless): `take_profit_pct`, `stop_loss_pct`, `max_hold_days`, `expire_before_dte`, `underlying_target_above`, `underlying_target_below`. Trailing stops + signal-coupled exits deferred.
+- A standalone engine (`tools/paper_close_engine.py`) reads positions, fetches Tradier quotes directly, evaluates conditions, fires closes for trippers. **Not integrated with FM** — separate Task Scheduler job every 2 min, market hours only by default.
+- 3-state status machine: `open → closing → closed`. Prevents double-submit of close orders.
+- Paper tables moved to `data/paper.db` to eliminate FM write-lock contention.
+- **Open is still manual; close is automatic for monitored positions only.**
+- Config defaults (`paper_trading.default_close_conditions`) exist for programmatic reference; they are NOT auto-applied to CLI opens.
+- Detailed plan: [`PHASE_B_PLAN.md`](PHASE_B_PLAN.md).
 
 ### C. First Auto-Open Consumer — FM Alerts
 - Every FM alert auto-opens a paper trade tagged with the scorer version (`fm_alert_v2`).
@@ -354,3 +357,4 @@ Items we don't need to answer for Phase 1 but should track:
 | 2026-05-18 | Initial draft. End states A–E defined. Phase 1 (State A) scope set. | Ben + Claude |
 | 2026-05-18 | **State A implementation shipped** — `core/tradier_paper.py`, `tools/paper_trading.py`, `tools/paper_trade.py`, `tools/paper_poll.py`, schema for `paper_executions` / `paper_positions` / `paper_account_snapshots`, decimal_formatter skip list extended. Partial-fill (delta tracking) and partial-close (qty decrement + running realized_pnl) verified by unit tests. Acceptance smoke test pending market open 2026-05-19. | Ben + Claude |
 | 2026-05-19 | **State A acceptance test PASSED** end-to-end. Option order 30219623 (SPY 5/22 $740C) filled @ $3.14 at open, equity order 30266026 (10× SPY) filled @ $732.54; both closed manually (option @ $1.90, equity @ $732.25); realized P&L -$126.90 (tag=`manual-test`); balance snapshot for 2026-05-19 = $99,872.30. **Observed:** parallel close-order invocations triggered transient `database is locked` during market hours; reproducing with FM paused → no lock. **Confirmed root cause:** Flow Monitor concurrent writes to `data/datalake.db` exceed the 10s busy_timeout during peak scan bursts. Paper-trading code itself is correct. **Decision:** Phase B will move paper tables to a separate DB file (`data/paper.db`) to eliminate contention. State A keeps current location for now — known issue, loud failure mode, no auto-consumer running yet. | Ben + Claude |
+| 2026-05-19 | **State B IMPLEMENTED.** New files: `tools/paper_close_engine.py` (standalone engine, Tradier-direct quotes, psutil instance guard, market-hours gating via Tradier clock, `--dry-run` mode), `tools/paper_migrate_to_paper_db.py` (one-shot migration), `scheduled_tasks/start_paper_engine.bat`. Schema additions: `paper_positions.closing_submitted_at` column, new `paper_pending_conditions` bridge table. State machine extended `open → closing → closed` (engine flips to `closing`, poller flips to `closed`). CLI gains `--update-conditions` subcommand + 6 condition flags (`--tp`/`--sl`/`--max-hold`/`--expire-before-dte`/`--target-above`/`--target-below`) on `--open` and `--update-conditions`. Paper tables migrated to `data/paper.db`; source rows preserved in `datalake.db` for one trading day before `--drop-source`. **Default-state assertion (deliberate):** manual `--open` without explicit condition flags creates an UNMONITORED position; engine ignores it. Config defaults exist for programmatic reference, not CLI auto-apply. | Ben + Claude |

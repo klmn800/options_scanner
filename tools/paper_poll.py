@@ -6,8 +6,9 @@ Polls Tradier sandbox for fill status on orders we submitted and writes
 fills into `paper_executions` / updates `paper_positions`. Also takes the
 daily balance snapshot when invoked with --snapshot.
 
-Phase 1 (State A) tool. Run by hand after placing orders. Phase B will
-hook into the Flow Monitor cycle.
+Phase 1 (State A) tool. Run by hand after placing orders. Phase B's
+close engine fires its own close orders and this poller picks them up
+on the next run (or you can chain `paper_close_engine.py && paper_poll.py`).
 
 Usage:
     python tools/paper_poll.py                # Poll all unrecorded fills
@@ -15,7 +16,7 @@ Usage:
     python tools/paper_poll.py --verbose      # Verbose logging
     python tools/paper_poll.py --order-id ID  # Poll a single Tradier order id
 
-Reads/writes: data/datalake.db (paper_* tables)
+Reads/writes: data/paper.db (paper_* tables)
 Dependencies: core/tradier_paper.py, tools/paper_trading.py
 """
 
@@ -36,8 +37,10 @@ sys.stdout.reconfigure(encoding='utf-8')
 from core.tradier_paper import TradierPaperBroker
 from tools.paper_trading import (
     _ensure_schema,
+    _is_closing_action,
     get_connection,
     open_or_update_position,
+    pop_pending_conditions,
     record_execution,
     snapshot_balance,
 )
@@ -209,6 +212,16 @@ def _process_order(conn, order, verbose=False):
         'tradier_order_id': str(order_id),
         'broker': 'tradier_sandbox',
     }
+
+    # Phase B: opening orders may have close conditions stashed by cmd_open.
+    # Pop them now so open_or_update_position attaches them to the new
+    # paper_positions row. No-op for closing orders.
+    if not _is_closing_action(side):
+        pending = pop_pending_conditions(conn, order_id)
+        if pending:
+            execution['close_conditions_json'] = pending
+            if verbose:
+                print("  applied pending conditions for order_id={}".format(order_id))
 
     exec_id = record_execution(conn, execution)
     pos_id = open_or_update_position(conn, execution, exec_id)

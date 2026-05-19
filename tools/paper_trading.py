@@ -2,18 +2,28 @@
 """
 Paper Trading — Shared Schema & Persistence Helpers
 ===================================================
-Common functions used by both `tools/paper_trade.py` (CLI) and
-`tools/paper_poll.py` (order/balance polling).
+Common functions used by both `tools/paper_trade.py` (CLI),
+`tools/paper_poll.py` (order/balance polling), and
+`tools/paper_close_engine.py` (Phase B auto-close engine).
 
-Tables (all in `data/datalake.db`):
+Tables (all in `data/paper.db`):
   - paper_executions          immutable log of fills
   - paper_positions           current/closed position rows
+                              status: 'open' | 'closing' | 'closed'
   - paper_account_snapshots   daily balance snapshot
+
+Phase B moved paper_* tables out of data/datalake.db to eliminate
+write-lock contention with Flow Monitor's intraday scans. Migration is
+a one-shot via `paper_migrate_to_paper_db.py`.
 
 Position-key convention is reused from `trade_ingest._make_position_key()`
 so paper and real positions share the same key format.
 
-Reads/writes: data/datalake.db
+Close conditions (Phase B) live in `paper_positions.close_conditions_json`.
+NULL by default — the close engine ignores positions with no conditions
+set. Schema documented in `parse_close_conditions()` below.
+
+Reads/writes: data/paper.db
 Dependencies: tools/trade_ingest.py (_make_position_key), tools/decimal_formatter.py
 """
 
@@ -35,20 +45,27 @@ from timezone_utils import now_eastern
 
 logger = logging.getLogger(__name__)
 
-DATALAKE_DB_PATH = os.path.join(project_root, 'data', 'datalake.db')
+PAPER_DB_PATH = os.path.join(project_root, 'data', 'paper.db')
 
 # Option contract multiplier (1 contract = 100 shares)
 OPTION_MULTIPLIER = 100
+
+# Close-conditions JSON schema version. Bump when adding fields.
+CLOSE_CONDITIONS_SCHEMA_VERSION = 1
+
+# Valid status values for paper_positions
+POSITION_STATUSES = ('open', 'closing', 'closed')
 
 
 # ── Connection ───────────────────────────────────────────────────────
 
 def get_connection():
-    """Open a connection to data/datalake.db with Row factory.
+    """Open a connection to data/paper.db with Row factory.
 
-    Mirrors the pattern used by tools/trade_ingest.py.
+    Phase B moved paper_* tables out of data/datalake.db to avoid
+    write-lock contention with Flow Monitor.
     """
-    conn = sqlite3.connect(DATALAKE_DB_PATH, timeout=10)
+    conn = sqlite3.connect(PAPER_DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -110,8 +127,27 @@ def _ensure_schema(conn):
             realized_pnl REAL,
             close_reason TEXT,
             close_conditions_json TEXT,
+            closing_submitted_at DATETIME,
             status TEXT NOT NULL DEFAULT 'open',
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Phase B addition: closing_submitted_at column for DBs created before B
+    cursor.execute("PRAGMA table_info(paper_positions)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    if 'closing_submitted_at' not in existing_cols:
+        cursor.execute("ALTER TABLE paper_positions ADD COLUMN closing_submitted_at DATETIME")
+
+    # Phase B: bridge table from --open submission to fill-time position
+    # creation. cmd_open writes a row here keyed by tradier_order_id; the
+    # poller pops it when processing the fill and copies close_conditions_json
+    # to the new paper_positions row.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS paper_pending_conditions (
+            tradier_order_id TEXT PRIMARY KEY,
+            close_conditions_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -157,6 +193,119 @@ def _is_closing_action(action):
     """Return True if the action closes (or reduces) an existing position."""
     a = (action or '').lower()
     return a in ('sell', 'sell_to_close', 'buy_to_close')
+
+
+# ── Close-Conditions Helpers (Phase B) ───────────────────────────────
+
+# Vocabulary of close conditions. Field name → expected Python type (for
+# validation). All fields nullable; null = condition inactive.
+CLOSE_CONDITION_FIELDS = {
+    'take_profit_pct': float,
+    'stop_loss_pct': float,
+    'max_hold_days': int,
+    'expire_before_dte': int,
+    'underlying_target_above': float,
+    'underlying_target_below': float,
+}
+
+
+def parse_close_conditions(json_str):
+    """Decode a paper_positions.close_conditions_json string into a dict.
+
+    Returns a dict with every field in CLOSE_CONDITION_FIELDS, defaulting
+    absent/null fields to None. Returns None if input is None or empty.
+    Malformed JSON returns None and logs a warning (engine should skip
+    the position rather than crash).
+
+    Schema:
+        {
+            "schema_version": 1,
+            "take_profit_pct": 25.0,         # close when pnl_pct >= value
+            "stop_loss_pct": -30.0,          # close when pnl_pct <= value
+            "max_hold_days": 5,              # close after N calendar days
+            "expire_before_dte": 1,          # close option at <= N DTE
+            "underlying_target_above": 750,  # close when underlying >= value
+            "underlying_target_below": 720,  # close when underlying <= value
+        }
+
+    Any field may be null; the engine treats null as "condition inactive."
+    """
+    if not json_str:
+        return None
+    try:
+        raw = json.loads(json_str)
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning("Malformed close_conditions_json: %s — %s", json_str, e)
+        return None
+    if not isinstance(raw, dict):
+        logger.warning("close_conditions_json is not a dict: %r", raw)
+        return None
+    out = {'schema_version': raw.get('schema_version', CLOSE_CONDITIONS_SCHEMA_VERSION)}
+    for field in CLOSE_CONDITION_FIELDS:
+        out[field] = raw.get(field)
+    return out
+
+
+def build_close_conditions(take_profit_pct=None, stop_loss_pct=None,
+                           max_hold_days=None, expire_before_dte=None,
+                           underlying_target_above=None,
+                           underlying_target_below=None):
+    """Build a close_conditions JSON string from individual flag values.
+
+    Returns None if all conditions are None (= NULL in DB column).
+    Otherwise returns a JSON string with schema_version set and absent
+    fields stored as null (so the JSON shape stays stable).
+
+    Use at --open time and --update-conditions time. The CLI's flag
+    parser maps argparse args directly into the kwargs here.
+    """
+    values = {
+        'take_profit_pct': take_profit_pct,
+        'stop_loss_pct': stop_loss_pct,
+        'max_hold_days': max_hold_days,
+        'expire_before_dte': expire_before_dte,
+        'underlying_target_above': underlying_target_above,
+        'underlying_target_below': underlying_target_below,
+    }
+    if all(v is None for v in values.values()):
+        return None
+
+    # Type-validate provided values
+    for field, value in values.items():
+        if value is None:
+            continue
+        expected = CLOSE_CONDITION_FIELDS[field]
+        try:
+            values[field] = expected(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"close condition {field!r}={value!r} not {expected.__name__}: {e}")
+
+    payload = {'schema_version': CLOSE_CONDITIONS_SCHEMA_VERSION, **values}
+    return json.dumps(payload)
+
+
+def summarize_close_conditions(json_str):
+    """Render a terse one-line summary of conditions for `--positions` output.
+
+    Returns 'unmonitored' if no conditions, else 'TP+25/SL-30/5d/...'
+    """
+    conds = parse_close_conditions(json_str)
+    if conds is None:
+        return 'unmonitored'
+    parts = []
+    if conds.get('take_profit_pct') is not None:
+        parts.append(f"TP+{conds['take_profit_pct']:g}")
+    if conds.get('stop_loss_pct') is not None:
+        parts.append(f"SL{conds['stop_loss_pct']:+g}")
+    if conds.get('max_hold_days') is not None:
+        parts.append(f"{conds['max_hold_days']}d")
+    if conds.get('expire_before_dte') is not None:
+        parts.append(f"dte<={conds['expire_before_dte']}")
+    if conds.get('underlying_target_above') is not None:
+        parts.append(f">${conds['underlying_target_above']:g}")
+    if conds.get('underlying_target_below') is not None:
+        parts.append(f"<${conds['underlying_target_below']:g}")
+    return '/'.join(parts) if parts else 'unmonitored'
 
 
 def _compute_total_cost(quantity, fill_price, instrument_type):
@@ -293,11 +442,14 @@ def open_or_update_position(conn, execution, execution_id):
     closing = _is_closing_action(execution.get('action'))
 
     if closing:
-        # Close the oldest open position with matching key+tag
+        # Close the oldest open-or-closing position with matching key+tag.
+        # 'closing' is the Phase B intermediate state set when an engine or
+        # manual --close has submitted a close order but the fill hasn't
+        # been recorded yet.
         cursor.execute("""
-            SELECT id, quantity, cost_basis_per_unit, realized_pnl
+            SELECT id, quantity, cost_basis_per_unit, realized_pnl, status
             FROM paper_positions
-            WHERE position_key = ? AND tag = ? AND status = 'open'
+            WHERE position_key = ? AND tag = ? AND status IN ('open', 'closing')
             ORDER BY opened_at ASC, id ASC
             LIMIT 1
         """, (position_key, tag))
@@ -386,16 +538,18 @@ def open_or_update_position(conn, execution, execution_id):
         conn.commit()
         return existing['id']
 
-    # Fresh open
+    # Fresh open. close_conditions_json may be supplied via the execution
+    # dict (paper_poll pops it from paper_pending_conditions before calling).
     total_cost = _compute_total_cost(quantity, fill_price, instrument_type)
     opened_at = execution.get('execution_timestamp') or now_eastern().isoformat(sep=' ', timespec='seconds')
+    close_conditions_json = execution.get('close_conditions_json')
     cursor.execute("""
         INSERT INTO paper_positions (
             position_key, tag, instrument_type, symbol, option_symbol,
             option_type, strike, expiration_date, quantity,
             cost_basis_per_unit, total_cost, opened_at,
-            opening_execution_id, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+            opening_execution_id, close_conditions_json, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
     """, (
         position_key,
         tag,
@@ -410,9 +564,54 @@ def open_or_update_position(conn, execution, execution_id):
         total_cost,
         opened_at,
         execution_id,
+        close_conditions_json,
     ))
     conn.commit()
     return cursor.lastrowid
+
+
+# ── Pending-Conditions Bridge (Phase B) ───────────────────────────────
+
+def set_pending_conditions(conn, tradier_order_id, close_conditions_json):
+    """Stash close conditions for a pending --open order.
+
+    Called by cmd_open after broker submits the order. The poller pops this
+    row when the fill is recorded and copies the JSON to paper_positions.
+    """
+    if not tradier_order_id or not close_conditions_json:
+        return
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR REPLACE INTO paper_pending_conditions
+            (tradier_order_id, close_conditions_json)
+        VALUES (?, ?)
+    """, (str(tradier_order_id), close_conditions_json))
+    conn.commit()
+
+
+def pop_pending_conditions(conn, tradier_order_id):
+    """Read + delete a pending-conditions row by tradier_order_id.
+
+    Returns the close_conditions_json string, or None if no pending row.
+    Safe to call multiple times — second call returns None.
+    """
+    if not tradier_order_id:
+        return None
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT close_conditions_json
+        FROM paper_pending_conditions
+        WHERE tradier_order_id = ?
+    """, (str(tradier_order_id),))
+    row = cursor.fetchone()
+    if not row:
+        return None
+    cursor.execute(
+        "DELETE FROM paper_pending_conditions WHERE tradier_order_id = ?",
+        (str(tradier_order_id),),
+    )
+    conn.commit()
+    return row[0]
 
 
 def snapshot_balance(conn, balances):

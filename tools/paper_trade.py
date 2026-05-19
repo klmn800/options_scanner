@@ -7,18 +7,27 @@ the Tradier sandbox, queries positions and balance, computes realized P&L.
 Phase 1 (State A) tool from docs/paper_trading/PHASE_1_PLAN.md.
 
 Subcommands (mutually exclusive):
-  --open       Submit an opening order (stock or option)
-  --close      Submit a closing order for a tracked paper_positions row
-  --cancel     Cancel an open Tradier order
-  --positions  List open paper positions
-  --status     Same as --positions, optionally filtered by --tag
-  --balance    Print current Tradier sandbox balance
-  --pnl        Print realized P&L grouped by tag
+  --open               Submit an opening order (stock or option)
+  --close              Submit a closing order for a tracked paper_positions row
+  --cancel             Cancel an open Tradier order
+  --update-conditions  Modify close-conditions on an open position
+  --positions          List open paper positions
+  --status             Same as --positions, optionally filtered by --tag
+  --balance            Print current Tradier sandbox balance
+  --pnl                Print realized P&L grouped by tag
 
 After every order placement, run `python tools/paper_poll.py` to record the
 fill into paper_executions / paper_positions.
 
-Reads/writes: data/datalake.db (paper_* tables)
+Phase B close conditions (NULL by default — unmonitored unless flags given):
+  --tp N             take_profit_pct          (close when pnl% >= N)
+  --sl N             stop_loss_pct            (close when pnl% <= -N; pass negative)
+  --max-hold N       max_hold_days            (close after N calendar days)
+  --expire-before-dte N    close option at <= N DTE
+  --target-above N   underlying_target_above  (close when underlying >= N)
+  --target-below N   underlying_target_below  (close when underlying <= N)
+
+Reads/writes: data/paper.db (paper_* tables)
 Dependencies: core/tradier_paper.py, tools/paper_trading.py
 """
 
@@ -40,7 +49,12 @@ from core.tradier_paper import TradierPaperBroker, sanitize_tag
 from tools.paper_trading import (
     get_connection,
     _ensure_schema,
+    build_close_conditions,
+    parse_close_conditions,
+    summarize_close_conditions,
+    set_pending_conditions,
 )
+from tools.timezone_utils import now_eastern
 
 logger = logging.getLogger(__name__)
 
@@ -118,18 +132,28 @@ def cmd_positions(conn, tag=None, include_closed=False):
         print("No paper positions found.")
         return 0
 
+    # Pull close_conditions_json in a second pass so the SELECT * stayed slim
+    cursor.execute(
+        "SELECT id, close_conditions_json FROM paper_positions WHERE id IN ({})".format(
+            ','.join('?' * len(rows))
+        ),
+        tuple(r['id'] for r in rows),
+    )
+    conditions_by_id = {r['id']: r['close_conditions_json'] for r in cursor.fetchall()}
+
     header = "Paper Positions{}{}".format(
         " (tag={})".format(tag) if tag else "",
         " — including closed" if include_closed else " — open only",
     )
     print(header)
-    print("=" * 100)
-    print("{:>4}  {:<7}  {:<7}  {:<22}  {:>5}  {:>8}  {:>10}  {:<7}  {:<19}".format(
-        "id", "tag", "inst", "symbol/contract", "qty", "cost", "total", "status", "opened_at"))
-    print("-" * 100)
+    print("=" * 120)
+    print("{:>4}  {:<7}  {:<7}  {:<22}  {:>5}  {:>8}  {:>10}  {:<7}  {:<19}  {:<20}".format(
+        "id", "tag", "inst", "symbol/contract", "qty", "cost", "total", "status", "opened_at", "conditions"))
+    print("-" * 120)
     for r in rows:
         contract = r['option_symbol'] if r['instrument_type'] == 'option' else r['symbol']
-        print("{:>4}  {:<7}  {:<7}  {:<22}  {:>5}  {:>8}  {:>10}  {:<7}  {:<19}".format(
+        cond_str = summarize_close_conditions(conditions_by_id.get(r['id']))
+        print("{:>4}  {:<7}  {:<7}  {:<22}  {:>5}  {:>8}  {:>10}  {:<7}  {:<19}  {:<20}".format(
             r['id'],
             (r['tag'] or '')[:7],
             r['instrument_type'][:7],
@@ -139,6 +163,7 @@ def cmd_positions(conn, tag=None, include_closed=False):
             _fmt_money(r['total_cost']),
             r['status'],
             (r['opened_at'] or '')[:19],
+            cond_str[:20],
         ))
         if r['status'] == 'closed':
             print("       closed @ {} exit={} pnl={} reason={}".format(
@@ -211,6 +236,28 @@ def cmd_open(broker, conn, args):
         print()
         print("WARNING: order returned status={}".format(status))
         return 1
+    # Stash close conditions (if any) keyed by tradier_order_id. The poller
+    # pops these when the fill arrives and copies them onto paper_positions.
+    # If the order is rejected/cancelled the pending row sits harmlessly.
+    try:
+        conditions_json = build_close_conditions(
+            take_profit_pct=args.tp,
+            stop_loss_pct=args.sl,
+            max_hold_days=args.max_hold,
+            expire_before_dte=args.expire_before_dte,
+            underlying_target_above=args.target_above,
+            underlying_target_below=args.target_below,
+        )
+    except ValueError as e:
+        print("ERROR: invalid close condition: {}".format(e))
+        return 2
+
+    if conditions_json:
+        set_pending_conditions(conn, order_id, conditions_json)
+        print("    close conditions: {}".format(summarize_close_conditions(conditions_json)))
+    else:
+        print("    close conditions: unmonitored (no --tp/--sl/--max-hold/... flags)")
+
     print()
     print("ORDER SUBMITTED: id={} status={}".format(order_id, status))
     print("Next step: run `python tools/paper_poll.py` to record the fill once Tradier reports it.")
@@ -231,8 +278,10 @@ def cmd_close(broker, conn, args):
     if not row:
         print("ERROR: no paper_positions row with id={}".format(args.position_id))
         return 2
-    if row['status'] != 'open':
-        print("ERROR: position id={} is status={} (not open)".format(row['id'], row['status']))
+    if row['status'] not in ('open',):
+        # 'closing' = previous close still pending; 'closed' = nothing to do
+        print("ERROR: position id={} is status={} (must be 'open' to close)".format(
+            row['id'], row['status']))
         return 2
 
     if row['instrument_type'] == 'option':
@@ -275,18 +324,86 @@ def cmd_close(broker, conn, args):
         print("WARNING: close order returned status={}".format(status))
         return 1
 
-    # Stash the user-supplied close_reason on the position so the poller can
-    # apply it when the fill comes back. close_reason default is 'manual'.
-    if args.reason:
-        cursor.execute(
-            "UPDATE paper_positions SET close_reason = ? WHERE id = ?",
-            (args.reason, row['id']),
-        )
-        conn.commit()
+    # Phase B: flip status to 'closing' immediately so the engine doesn't
+    # also fire a close on the next cycle (idempotency). The poller will
+    # complete the transition to 'closed' when the fill is recorded.
+    closing_submitted_at = now_eastern().isoformat(sep=' ', timespec='seconds')
+    cursor.execute(
+        "UPDATE paper_positions SET status='closing', close_reason=?, "
+        "closing_submitted_at=? WHERE id=?",
+        (args.reason or 'manual', closing_submitted_at, row['id']),
+    )
+    conn.commit()
 
     print()
     print("CLOSE ORDER SUBMITTED: id={} status={} side={}".format(order_id, status, close_side))
+    print("Position id={} → status='closing' (poll to flip to 'closed' on fill)".format(row['id']))
     print("Next step: run `python tools/paper_poll.py` to record the closing fill.")
+    return 0
+
+
+# ── Subcommand: --update-conditions ──────────────────────────────────
+
+def cmd_update_conditions(conn, args):
+    """Modify close-conditions on an existing open position.
+
+    Pass condition flags to overwrite, OR --clear to wipe all conditions
+    back to NULL (= unmonitored). Without any condition flags or --clear,
+    just prints current conditions.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, status, close_conditions_json FROM paper_positions WHERE id=?",
+        (args.position_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        print("ERROR: no paper_positions row with id={}".format(args.position_id))
+        return 2
+    if row['status'] != 'open':
+        print("ERROR: position id={} is status={} (must be 'open' to update conditions)".format(
+            row['id'], row['status']))
+        return 2
+
+    current = row['close_conditions_json']
+    print("Position id={} — current conditions: {}".format(
+        row['id'], summarize_close_conditions(current)))
+
+    if args.clear:
+        cursor.execute(
+            "UPDATE paper_positions SET close_conditions_json=NULL WHERE id=?",
+            (row['id'],),
+        )
+        conn.commit()
+        print("CLEARED — position is now unmonitored.")
+        return 0
+
+    # Any condition flag set?
+    has_any = any(getattr(args, k) is not None for k in
+                  ('tp', 'sl', 'max_hold', 'expire_before_dte', 'target_above', 'target_below'))
+    if not has_any:
+        print("(no condition flags passed; nothing changed. Use --clear to wipe, or pass --tp/--sl/etc.)")
+        return 0
+
+    try:
+        new_json = build_close_conditions(
+            take_profit_pct=args.tp,
+            stop_loss_pct=args.sl,
+            max_hold_days=args.max_hold,
+            expire_before_dte=args.expire_before_dte,
+            underlying_target_above=args.target_above,
+            underlying_target_below=args.target_below,
+        )
+    except ValueError as e:
+        print("ERROR: invalid close condition: {}".format(e))
+        return 2
+
+    cursor.execute(
+        "UPDATE paper_positions SET close_conditions_json=? WHERE id=?",
+        (new_json, row['id']),
+    )
+    conn.commit()
+    print("UPDATED — new conditions: {}".format(summarize_close_conditions(new_json)))
     return 0
 
 
@@ -378,6 +495,8 @@ Examples:
     group.add_argument('--open', action='store_true', help='Submit an opening order')
     group.add_argument('--close', action='store_true', help='Submit a closing order for a tracked position')
     group.add_argument('--cancel', action='store_true', help='Cancel an open Tradier order')
+    group.add_argument('--update-conditions', dest='update_conditions', action='store_true',
+                       help='Modify close-conditions on an open position')
     group.add_argument('--positions', action='store_true', help='List paper positions (open by default)')
     group.add_argument('--status', action='store_true', help='Alias for --positions')
     group.add_argument('--balance', action='store_true', help='Print current Tradier sandbox balance')
@@ -416,6 +535,22 @@ Examples:
     # --positions flag
     parser.add_argument('--include-closed', action='store_true',
                         help='Include closed positions in --positions listing')
+
+    # Phase B close-condition flags (used by --open and --update-conditions)
+    parser.add_argument('--tp', type=float, default=None,
+                        help='take_profit_pct — close when pnl%% >= N')
+    parser.add_argument('--sl', type=float, default=None,
+                        help='stop_loss_pct — close when pnl%% <= N (pass negative, e.g. -30)')
+    parser.add_argument('--max-hold', type=int, default=None,
+                        help='max_hold_days — close after N calendar days')
+    parser.add_argument('--expire-before-dte', type=int, default=None,
+                        help='close option position when DTE drops <= N')
+    parser.add_argument('--target-above', type=float, default=None,
+                        help='underlying_target_above — close when underlying >= N')
+    parser.add_argument('--target-below', type=float, default=None,
+                        help='underlying_target_below — close when underlying <= N')
+    parser.add_argument('--clear', action='store_true',
+                        help='(--update-conditions only) wipe all conditions to NULL')
 
     args = parser.parse_args()
 
@@ -459,6 +594,11 @@ Examples:
                 print("ERROR: --cancel requires --order-id")
                 return 2
             return cmd_cancel(broker, args)
+        if args.update_conditions:
+            if args.position_id is None:
+                print("ERROR: --update-conditions requires --position-id")
+                return 2
+            return cmd_update_conditions(conn, args)
         if args.pnl:
             return cmd_pnl(conn, tag=args.tag, since=args.since)
     finally:

@@ -1,7 +1,7 @@
 # Paper Trading Platform
 
-> **Status:** Phase 1 (State A — Manual PoC) **LIVE** as of 2026-05-18.
-> **Source of truth for design:** [DESIGN.md](DESIGN.md). **Build plan:** [PHASE_1_PLAN.md](PHASE_1_PLAN.md).
+> **Status:** State A **LIVE** 2026-05-18. State B (Engine-Managed Exits) **LIVE** 2026-05-19.
+> **Source of truth for design:** [DESIGN.md](DESIGN.md). **Build plans:** [PHASE_1_PLAN.md](PHASE_1_PLAN.md), [PHASE_B_PLAN.md](PHASE_B_PLAN.md).
 > **This file** is the operational reference — read here when you need to *use* the system.
 
 ## What this is
@@ -24,7 +24,7 @@ real P&L track, segregated by `tag`, comparable across versions and variants.
 | State | What "done" looks like | Status |
 |---|---|---|
 | **A** | Manual paper trading via CLI. Buy/sell equities and options, polled fills, tagged P&L, daily balance snapshot. | **LIVE** |
-| **B** | Engine-managed exits. Positions carry `close_conditions` (take profit / stop loss / max hold); engine fires closes. | Next |
+| **B** | Engine-managed exits. Positions carry `close_conditions_json` (TP / SL / max hold / DTE / underlying targets); standalone engine fires closes. | **LIVE** |
 | **C** | First auto-open consumer: FM alerts. Every alert opens a paper trade tagged by scorer version. | Future |
 | **D** | Multi-consumer platform. FM alerts + earnings STRONG BUY straddles + TA journal running concurrently. | Future |
 | **E** | A/B experiment harness. Formal framework for named strategy comparisons against shared triggers. | Future |
@@ -38,17 +38,28 @@ real P&L track, segregated by `tag`, comparable across versions and variants.
 python tools/paper_trade.py --balance
 
 # Open a SPY weekly ATM call, 1 contract, market order, tagged "manual-test"
+# (UNMONITORED — close it yourself, the engine ignores it)
 python tools/paper_trade.py --open --instrument option --symbol SPY \
     --option-symbol SPY260522C00740000 --side buy_to_open --qty 1 \
     --type market --tag manual_test
 
+# Same trade but MONITORED — engine auto-closes per these conditions
+python tools/paper_trade.py --open --instrument option --symbol SPY \
+    --option-symbol SPY260522C00740000 --side buy_to_open --qty 1 \
+    --type market --tag manual_test \
+    --tp 25 --sl -30 --max-hold 5 --expire-before-dte 1
+
 # After Tradier reports the fill, record it locally
 python tools/paper_poll.py
 
-# Check open positions
+# Check open positions (shows conditions column)
 python tools/paper_trade.py --positions
 
-# Close a position by paper_positions.id
+# Retrofit conditions onto an existing position (or update existing ones)
+python tools/paper_trade.py --update-conditions --position-id 7 --tp 30 --sl -25
+python tools/paper_trade.py --update-conditions --position-id 7 --clear  # back to unmonitored
+
+# Manually close a position (overrides any conditions)
 python tools/paper_trade.py --close --position-id 1 --reason manual
 python tools/paper_poll.py            # records the closing fill
 
@@ -57,6 +68,10 @@ python tools/paper_trade.py --pnl --tag manual_test
 
 # Daily balance snapshot (run end-of-day)
 python tools/paper_poll.py --snapshot
+
+# Phase B close engine (Task Scheduler runs this every 2 min during market hours)
+python tools/paper_close_engine.py --dry-run --verbose   # safe testing
+python tools/paper_close_engine.py                       # live submission
 ```
 
 **Important caveats:**
@@ -79,8 +94,10 @@ python tools/paper_poll.py --snapshot
 ┌────────────────────────▼─────────────────────────────────────────────┐
 │ LAYER 3 — Persistence helpers (importable by any consumer)           │
 │   tools/paper_trading.py                                             │
-│     _ensure_schema()             3 tables, 6 indexes, idempotent     │
-│     get_connection()             sqlite3 conn → data/datalake.db     │
+│     _ensure_schema()             4 tables, 6 indexes, idempotent     │
+│     get_connection()             sqlite3 conn → data/paper.db        │
+│     parse/build_close_conditions Phase B JSON helpers                │
+│     set/pop_pending_conditions   bridge between open and fill        │
 │     record_execution()           INSERT into paper_executions        │
 │     open_or_update_position()    INSERT/UPDATE paper_positions       │
 │     snapshot_balance()           INSERT today's row into snapshots   │
@@ -116,15 +133,16 @@ python tools/paper_poll.py --snapshot
 
 ## CLI reference — `tools/paper_trade.py`
 
-Seven mutually exclusive subcommands. Run one per invocation.
+Eight mutually exclusive subcommands. Run one per invocation.
 
 | Subcommand | Required flags | Notes |
 |---|---|---|
 | `--balance` | (none) | Tradier sandbox balance summary |
-| `--positions` / `--status` | (none) | List paper positions. `--tag T` filters; `--include-closed` shows closed too |
+| `--positions` / `--status` | (none) | List paper positions. `--tag T` filters; `--include-closed` shows closed too. Conditions column shows `TP+25/SL-30/5d/...` or `unmonitored` |
 | `--pnl` | (none) | Realized P&L by tag. `--tag T` filters; `--since YYYY-MM-DD` filters by close date |
-| `--open` | `--instrument {stock\|option} --symbol --side --qty --type` | See below |
-| `--close` | `--position-id N` | Optional `--reason {manual\|take_profit\|stop_loss\|max_hold\|signal_event}` |
+| `--open` | `--instrument {stock\|option} --symbol --side --qty --type` | Add condition flags to monitor; omit to leave unmonitored. See below |
+| `--close` | `--position-id N` | Optional `--reason {manual\|take_profit\|stop_loss\|max_hold\|signal_event}`. Immediately flips status `open → closing`. Poller flips to `closed` on fill |
+| `--update-conditions` | `--position-id N` | Pass condition flags to overwrite, or `--clear` to wipe back to unmonitored. Without flags, just prints current conditions |
 | `--cancel` | `--order-id N` | Cancels an open Tradier order by Tradier ID |
 
 ### `--open` full args
@@ -144,6 +162,12 @@ Seven mutually exclusive subcommands. Run one per invocation.
 | `--tag` | free text | Default `manual`. Auto-sanitized to Tradier-safe chars. |
 | `--preview` | flag | Validate via Tradier, do not submit |
 | `--source-event-id` | string | Idempotency key for auto-consumers; manual use leaves NULL |
+| `--tp` | float | Phase B. take_profit_pct — close when pnl% ≥ N |
+| `--sl` | float (negative) | Phase B. stop_loss_pct — close when pnl% ≤ N |
+| `--max-hold` | int | Phase B. max_hold_days — close after N calendar days |
+| `--expire-before-dte` | int | Phase B. Option-only. Close when DTE ≤ N (avoid auto-exercise) |
+| `--target-above` | float | Phase B. Close when underlying price ≥ N |
+| `--target-below` | float | Phase B. Close when underlying price ≤ N |
 
 ### CLI examples
 
@@ -171,6 +195,100 @@ python tools/paper_trade.py --pnl --tag fm_alert_v2 --since 2026-05-01
 
 ---
 
+## Phase B — Close Conditions Vocabulary
+
+`paper_positions.close_conditions_json` stores the per-position "thesis" the engine evaluates each cycle.
+
+**⚠️ NULL by default.** A manual `--open` without any `--tp`/`--sl`/`--max-hold`/etc. flags creates an
+**unmonitored** position. The engine skips unmonitored rows entirely. This is intentional — the platform
+will not auto-close a position you didn't ask it to. To opt in, pass condition flags at open time, or use
+`--update-conditions` later.
+
+| Field | CLI flag | Meaning | Trip rule |
+|---|---|---|---|
+| `take_profit_pct` | `--tp N` | Float, positive | Close when `current_pnl_pct >= N` |
+| `stop_loss_pct` | `--sl N` | Float, negative | Close when `current_pnl_pct <= N` |
+| `max_hold_days` | `--max-hold N` | Int | Close when held ≥ N calendar days |
+| `expire_before_dte` | `--expire-before-dte N` | Int, option-only | Close option when DTE ≤ N |
+| `underlying_target_above` | `--target-above N` | Float | Close when underlying price ≥ N |
+| `underlying_target_below` | `--target-below N` | Float | Close when underlying price ≤ N |
+
+Any field may be null/absent → that condition is inactive. The engine fires a close on the **first**
+condition that trips (any-of, not all-of). Stop-loss is evaluated before take-profit so a position tripping
+both simultaneously gets the safer close reason.
+
+The `paper_trading.default_close_conditions` block in `config.json` exists for **programmatic reference**
+(future auto-consumers will read it as a template). CLI `--open` does **not** auto-apply it.
+
+Update a position's conditions:
+```bash
+python tools/paper_trade.py --update-conditions --position-id 7 --tp 30 --sl -25
+python tools/paper_trade.py --update-conditions --position-id 7 --clear   # back to unmonitored
+python tools/paper_trade.py --update-conditions --position-id 7           # prints current, no change
+```
+
+---
+
+## Phase B — Close Engine
+
+`tools/paper_close_engine.py` is a standalone reconciliation script. Each invocation:
+
+1. Acquires a psutil-based instance lock — refuses to run a second copy.
+2. Checks Tradier's `markets/clock` endpoint. If market is closed and `--ignore-market-hours` not passed,
+   skips evaluation entirely (no quote fetch).
+3. Reads all `paper_positions WHERE status='open' AND close_conditions_json IS NOT NULL`.
+4. Batch-fetches Tradier quotes for every relevant underlying + option symbol in one call.
+5. Evaluates each position's conditions. Logs every trip with the reason and trigger detail.
+6. For tripped positions: submits a closing order, flips status to `'closing'`, records `close_reason` +
+   `closing_submitted_at`. `paper_poll.py` flips `'closing' → 'closed'` when the fill is recorded.
+
+### Engine CLI flags
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Evaluate + log trips, do NOT submit close orders. Essential for testing. |
+| `--ignore-market-hours` | Run evaluation even when market is closed (testing only) |
+| `--position-id N` | Evaluate only one paper_positions.id (testing) |
+| `--verbose` | Log every position's evaluation, not just trips |
+
+### Scheduling
+
+Task Scheduler runs `scheduled_tasks/start_paper_engine.bat` every 2 minutes during market hours (M-F
+9:30 AM – 4:00 PM ET). Engine self-skips when Tradier reports market closed, so off-hours runs are
+no-ops. **On first deployment**, edit the `.bat` to include `--dry-run` for one trading day to validate
+condition evaluation against real market data before letting it submit closes.
+
+### Status state machine
+
+```
+                ┌─────────┐    cmd_close OR engine trip
+                │  open   │ ──────────────────────────┐
+                └─────────┘                           │
+                                                      ▼
+                                              ┌─────────────┐
+                                              │   closing   │
+                                              └─────────────┘
+                                                      │
+                                              paper_poll.py records fill
+                                                      │
+                                                      ▼
+                                              ┌─────────────┐
+                                              │   closed    │
+                                              └─────────────┘
+```
+
+The `'closing'` intermediate state prevents the engine from re-submitting close orders for a position whose
+previous close is still pending fill. This is the idempotency mechanism.
+
+### Stuck-in-closing recovery
+
+If Tradier rejects a close order (sandbox glitch, contract just expired, etc.) the engine leaves the
+position in `'open'` state (not `'closing'`) and increments the error counter. If a `'closing'` row exists
+but no fill ever comes (Tradier order cancelled out-of-band), use direct SQL to roll status back to
+`'open'` and let the engine retry. A future `--unstick` CLI command may automate this.
+
+---
+
 ## CLI reference — `tools/paper_poll.py`
 
 | Invocation | Purpose |
@@ -186,7 +304,11 @@ captured as incremental rows.
 
 ---
 
-## Data model — three tables in `data/datalake.db`
+## Data model — four tables in `data/paper.db`
+
+> **Phase B moved paper tables out of `data/datalake.db`** to eliminate FM write-lock contention.
+> Migration was one-shot via `tools/paper_migrate_to_paper_db.py`. Querying via `direct_db_query.py`
+> requires `--db data/paper.db`.
 
 ### `paper_executions` — immutable fill log
 One row per fill. Multiple rows per Tradier order if it fills partially.
@@ -219,9 +341,23 @@ One row per fill. Multiple rows per Tradier order if it fills partially.
 | `cost_basis_per_unit` | Avg fill price; recalculated when averaging in |
 | `total_cost` | `quantity * cost_basis * multiplier` |
 | `realized_pnl` | **Accumulates** across partial closes; populated on first close (not NULL means trades happened) |
-| `status` | `open` / `closed`. Only flips to `closed` when `quantity` hits 0. |
-| `close_reason` | `manual` / `take_profit` / `stop_loss` / `max_hold` / `signal_event` |
-| `close_conditions_json` | Phase B: `{"take_profit_pct":25,"stop_loss_pct":-30,"max_hold_days":5}` |
+| `status` | `open` / `closing` / `closed`. See close engine section for the state machine. |
+| `close_reason` | `manual` / `take_profit_pct` / `stop_loss_pct` / `max_hold_days` / `expire_before_dte` / `underlying_target_above` / `underlying_target_below` / `signal_event` |
+| `close_conditions_json` | Phase B per-position thesis. **NULL = unmonitored.** See Close Conditions Vocabulary section. |
+| `closing_submitted_at` | Phase B. Timestamp when close order was submitted (status flipped to `closing`). |
+
+### `paper_pending_conditions` — Phase B bridge table
+
+Keyed by `tradier_order_id`. Holds close-conditions stashed by `paper_trade.py --open` between order
+submission and fill recording. `paper_poll.py` pops the row when the fill is processed and copies the
+JSON onto the new `paper_positions` row. If an order is rejected/cancelled the pending row sits
+harmlessly until a future cleanup.
+
+| Column | Notes |
+|---|---|
+| `tradier_order_id` | PK |
+| `close_conditions_json` | The JSON blob to apply to the resulting position |
+| `created_at` | Insertion timestamp |
 
 ### `paper_account_snapshots` — daily balance time-series
 
@@ -309,9 +445,11 @@ account-specific endpoints with a 401.
   market open against opening-tick quotes.
 - **Auto-exercise risk on near-expiry ITM options.** Tradier sandbox may auto-exercise expiring ITM contracts.
   Close manually before expiry or pick longer-dated contracts for tests.
-- **Quick sync is NOT wired up yet.** Phase 1 reads `paper_*` tables directly from `data/datalake.db`. Claude
-  Code's default query DB (`datalake_query.db`) doesn't have these rows until the sync rules are extended.
-  Use `--db data/datalake.db` when querying via `direct_db_query.py`.
+- **Paper tables live in `data/paper.db`** (Phase B), not `datalake.db` and not `datalake_query.db`. Use
+  `--db data/paper.db` when querying via `direct_db_query.py`. Quick sync is not wired to paper.db (and
+  doesn't need to be — the engine writes directly).
+- **Phase B engine evaluates conditions stateless.** Trailing stops, signal-coupled exits, and IV-collapse
+  exits are deferred to later phases. Only the 6 conditions in the vocabulary table are honored today.
 
 ---
 
@@ -329,15 +467,20 @@ Built now so Phase B/C/D don't need migrations:
 ## Files
 
 ```
-config.json                       tradier_sandbox block: api_key + account_id
-core/tradier_paper.py             TradierPaperBroker + sanitize_tag
-tools/paper_trading.py            schema + persistence helpers (shared)
-tools/paper_trade.py              human-facing CLI
-tools/paper_poll.py               fill recorder + balance snapshot
-tools/decimal_formatter.py        skip_formatting set extended for paper text columns
-docs/paper_trading/DESIGN.md      design + end states + decisions (source of truth)
-docs/paper_trading/PHASE_1_PLAN.md  build plan for State A
-docs/paper_trading/README.md      this file
+config.json                                    tradier_sandbox + paper_trading blocks
+core/tradier_paper.py                          TradierPaperBroker + sanitize_tag
+tools/paper_trading.py                         schema + persistence helpers (shared)
+tools/paper_trade.py                           human-facing CLI (--open/--close/--update-conditions/...)
+tools/paper_poll.py                            fill recorder + balance snapshot
+tools/paper_close_engine.py                    Phase B condition evaluator + close submitter
+tools/paper_migrate_to_paper_db.py             one-shot Phase B migration (datalake.db → paper.db)
+tools/decimal_formatter.py                     skip_formatting set extended for paper text columns
+scheduled_tasks/start_paper_engine.bat         Task Scheduler entrypoint for the engine
+docs/paper_trading/DESIGN.md                   design + end states + decisions (source of truth)
+docs/paper_trading/PHASE_1_PLAN.md             build plan for State A
+docs/paper_trading/PHASE_B_PLAN.md             build plan for State B
+docs/paper_trading/README.md                   this file
+data/paper.db                                  the paper_* tables (Phase B onward)
 ```
 
 ## Cross-references
