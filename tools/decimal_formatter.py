@@ -157,7 +157,10 @@ def format_database_values(data_dict, column_types=None):
         'roll_counterpart_details',
         # Trade execution fields
         'action', 'instrument_type', 'position_key', 'broker',
-        'email_message_id', 'robinhood_order_id', 'trade_call_ref', 'review_status'
+        'email_message_id', 'robinhood_order_id', 'trade_call_ref', 'review_status',
+        # Paper trading text columns (paper_executions, paper_positions, paper_account_snapshots)
+        'tag', 'source_event_id', 'tradier_order_id', 'option_symbol',
+        'close_conditions_json', 'close_reason', 'raw_response_json', 'status'
     }
 
     # Add quarterly date fields to skip list
