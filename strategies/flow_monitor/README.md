@@ -44,6 +44,19 @@ Each cycle:
 
 **What affects cycle speed**: Tradier API response time (primary), database size/lock contention (secondary), number of chains returned per symbol (varies by time of day and market conditions).
 
+#### Sticky Contract Preservation (added 2026-05-20)
+
+The Collection step filters strikes to ±20% of the underlying, then **unions in any contract already present in `option_contracts`** with `expiration_date >= today`. This keeps contracts in scope after the underlying drifts outside the band (e.g., a previously-ATM strike that's now 30% OTM after a one-day move).
+
+Implementation in `fm_collector.py`:
+- `_load_sticky_map()` runs **once per FM session** — single bulk query against `option_contracts`, buckets by symbol, logs `FM sticky map loaded: N symbols, K contracts (date YYYY-MM-DD)` on first cycle.
+- `_get_sticky_set(symbol)` lazy-loads the map and re-checks on date rollover.
+- Filter: `_filter_options_for_flow(..., expiration=, sticky_set=)`
+- The secondary zero-volume / low-OI cut also bypasses sticky contracts so the closing-flow signal isn't suppressed.
+- Case-normalized: `option_contracts.option_type` is UPPERCASE, Tradier returns lowercase — both lowered for the sticky key.
+
+Forward-looking only — contracts dropped before 2026-05-20 are not recovered. The only writer to `option_contracts` is Option Pipeline (morning + evening), both outside FM hours, so the map is frozen for the entire FM session.
+
 ### Phase 3: Post-Market (4:30 PM) — ~15-20 minutes
 
 | Task | Module | Duration | Failure severity |

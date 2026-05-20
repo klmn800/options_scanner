@@ -282,7 +282,12 @@ class OIDCollector:
             if underlying_price <= 0:
                 logging.debug("Invalid price for {}: {}".format(symbol, underlying_price))
                 return []
-            
+
+            # Sticky set: contracts already in option_contracts for this symbol
+            # that haven't expired yet. Lets us keep collecting strikes that
+            # have drifted outside the strike-range band due to underlying moves.
+            sticky_set = self._get_sticky_contracts(symbol)
+
             # Get option expirations
             expirations_data = self.tradier_client.get_option_expirations(symbol)
             self.collection_stats['api_calls_made'] += 1
@@ -340,8 +345,10 @@ class OIDCollector:
                     logging.debug("Empty options list for {} {}".format(symbol, expiration))
                     continue
                 
-                # Filter by strike range
-                filtered_options = self._filter_strikes_by_range(options, underlying_price)
+                # Filter by strike range (sticky-set union keeps drifted contracts)
+                filtered_options = self._filter_strikes_by_range(
+                    options, underlying_price, expiration=expiration, sticky_set=sticky_set
+                )
                 logging.debug("Filtered {} options to {} within strike range".format(
                     len(options), len(filtered_options)
                 ))
@@ -403,10 +410,16 @@ class OIDCollector:
         
         return valid_expirations
     
-    def _filter_strikes_by_range(self, options, underlying_price):
-        """Filter strikes within configured percentage of current price"""
+    def _filter_strikes_by_range(self, options, underlying_price, expiration=None, sticky_set=None):
+        """Filter strikes within configured percentage of current price.
+
+        Options whose (strike, expiration, type) is in sticky_set are kept
+        regardless of range — preserves data continuity on contracts already
+        tracked when the underlying drifts outside the band.
+        """
         min_strike = underlying_price * (1 - self.strike_range_pct)
         max_strike = underlying_price * (1 + self.strike_range_pct)
+        sticky_set = sticky_set or set()
 
         filtered = []
         for option in options:
@@ -416,8 +429,32 @@ class OIDCollector:
             strike = float(option.get('strike', 0))
             if min_strike <= strike <= max_strike:
                 filtered.append(option)
+                continue
+            if expiration:
+                key = (strike, expiration, (option.get('option_type') or '').lower())
+                if key in sticky_set:
+                    filtered.append(option)
 
         return filtered
+
+    def _get_sticky_contracts(self, symbol):
+        """Return set of (strike, expiration_date, option_type_lower) tuples
+        already in option_contracts for this symbol with expiration >= today.
+
+        Keeps the collector tracking contracts that drift outside the strike-range
+        band due to underlying price swings.
+        """
+        today_str = eastern_date_string()
+        rows = self.storage.query_with_params(
+            """SELECT DISTINCT strike, expiration_date, option_type
+               FROM option_contracts
+               WHERE symbol = ? AND expiration_date >= ?""",
+            (symbol, today_str),
+        )
+        return {
+            (float(r['strike']), r['expiration_date'], (r['option_type'] or '').lower())
+            for r in rows
+        }
     
     def _create_contract_record(self, symbol, option, expiration, underlying_price, total_symbol_oi):
         """Create contract record with all required fields"""

@@ -114,6 +114,12 @@ class FMCollector:
         self.last_contracts_collected = 0
         self.last_symbols_with_data = 0
 
+        # Sticky-contract map: {symbol: set of (strike, exp, option_type_lower)}.
+        # Bulk-loaded once per trading day from option_contracts so contracts that
+        # drift outside the strike-range band stay tracked across FM cycles.
+        self._sticky_map = None
+        self._sticky_map_date = None
+
         logging.debug("FM Collector initialized with modular config and storage")
     
     def _get_project_root(self):
@@ -460,6 +466,10 @@ class FMCollector:
                 logging.warning("No valid underlying price for {} - skipping".format(symbol))
                 return []
 
+            # Sticky set: contracts already in option_contracts for this symbol that
+            # haven't expired yet. Keeps strikes that drifted outside ±20% in scope.
+            sticky_set = self._get_sticky_set(symbol)
+
             # Initialize the list to collect all contracts
             all_contracts = []
 
@@ -516,8 +526,12 @@ class FMCollector:
                     if not isinstance(options_list, list):
                         options_list = [options_list]
                     
-                    # Filter to flow-relevant strikes (also removes adjusted options)
-                    filtered_options = self._filter_options_for_flow(options_list, underlying_price, symbol)
+                    # Filter to flow-relevant strikes (also removes adjusted options).
+                    # Sticky set unions in previously-tracked contracts.
+                    filtered_options = self._filter_options_for_flow(
+                        options_list, underlying_price, symbol,
+                        expiration=expiration, sticky_set=sticky_set,
+                    )
                     
                     if filtered_options:
                         # Create contract dictionaries for storage
@@ -528,18 +542,25 @@ class FMCollector:
                             strike = option.get('strike', 0)
 
                             # Apply data-driven filter: remove zero-volume contracts that are
-                            # >10% from underlying price AND have <50 open interest
+                            # >10% from underlying price AND have <50 open interest.
+                            # Sticky contracts bypass this cut for data continuity.
                             if volume == 0 and strike and underlying_price:
-                                distance_from_underlying = abs(strike - underlying_price) / underlying_price
-                                
-                                # Get filter config with defaults
-                                config_filters = self.config_manager.config.get('flow_monitor', {}).get('collection_filters', {})
-                                max_distance = config_filters.get('max_distance_from_underlying', 0.10)
-                                min_oi_distant = config_filters.get('min_oi_for_distant_strikes', 50)
-                                
-                                # Remove if far from money AND low open interest
-                                if distance_from_underlying > max_distance and open_interest < min_oi_distant:
-                                    continue
+                                sticky_key = (
+                                    float(strike),
+                                    option.get('expiration_date'),
+                                    (option.get('option_type') or '').lower(),
+                                )
+                                if sticky_key not in sticky_set:
+                                    distance_from_underlying = abs(strike - underlying_price) / underlying_price
+
+                                    # Get filter config with defaults
+                                    config_filters = self.config_manager.config.get('flow_monitor', {}).get('collection_filters', {})
+                                    max_distance = config_filters.get('max_distance_from_underlying', 0.10)
+                                    min_oi_distant = config_filters.get('min_oi_for_distant_strikes', 50)
+
+                                    # Remove if far from money AND low open interest
+                                    if distance_from_underlying > max_distance and open_interest < min_oi_distant:
+                                        continue
                                 
                             # Calculate days to expiration
                             exp_date = datetime.strptime(option.get('expiration_date'), '%Y-%m-%d').date()
@@ -664,11 +685,15 @@ class FMCollector:
 
         return filtered
     
-    def _filter_options_for_flow(self, options_list, underlying_price, symbol=None):
-        """Filter options to flow-relevant strikes (±20% of underlying price)
+    def _filter_options_for_flow(self, options_list, underlying_price, symbol=None,
+                                  expiration=None, sticky_set=None):
+        """Filter options to flow-relevant strikes (±20% of underlying price).
 
         Also filters out adjusted options (e.g. BDX1, GME1) that result from
         corporate actions. These have different deliverables and confuse flow analysis.
+
+        Options whose (strike, expiration, type) is in sticky_set are kept even if
+        outside ±20% — preserves continuity on contracts already in option_contracts.
         """
         if not options_list or underlying_price <= 0:
             return []
@@ -676,6 +701,7 @@ class FMCollector:
         # Calculate strike range (±20%)
         itm_threshold = underlying_price * 0.80  # 20% below current price
         otm_threshold = underlying_price * 1.20  # 20% above current price
+        sticky_set = sticky_set or set()
 
         filtered_options = []
         adjusted_skipped = 0
@@ -698,6 +724,10 @@ class FMCollector:
                 # Keep options within ±20% range
                 if itm_threshold <= strike <= otm_threshold:
                     filtered_options.append(option)
+                elif expiration:
+                    key = (strike, expiration, (option.get('option_type') or '').lower())
+                    if key in sticky_set:
+                        filtered_options.append(option)
 
             except (ValueError, TypeError, AttributeError):
                 continue  # Skip options with invalid strike data or None values
@@ -707,6 +737,37 @@ class FMCollector:
                 adjusted_skipped, symbol))
 
         return filtered_options
+
+    def _load_sticky_map(self):
+        """Bulk-load (strike, expiration, option_type_lower) tuples grouped by
+        symbol from option_contracts. Called once per trading day on first use.
+        """
+        today_str = eastern_date_string()
+        rows = self.storage.query_with_params(
+            """SELECT DISTINCT symbol, strike, expiration_date, option_type
+               FROM option_contracts
+               WHERE expiration_date >= ?""",
+            (today_str,),
+        )
+        sticky_map = {}
+        for r in rows:
+            sym = r['symbol']
+            key = (float(r['strike']), r['expiration_date'], (r['option_type'] or '').lower())
+            sticky_map.setdefault(sym, set()).add(key)
+        self._sticky_map = sticky_map
+        self._sticky_map_date = today_str
+        logging.info(
+            "FM sticky map loaded: {} symbols, {} contracts (date {})".format(
+                len(sticky_map), sum(len(v) for v in sticky_map.values()), today_str
+            )
+        )
+
+    def _get_sticky_set(self, symbol):
+        """Return sticky-contract set for symbol, loading the day's map if needed."""
+        today_str = eastern_date_string()
+        if self._sticky_map is None or self._sticky_map_date != today_str:
+            self._load_sticky_map()
+        return self._sticky_map.get(symbol, set())
     
     def _store_options(self, options_data, scan_timestamp):
         """Store options data using new storage module"""

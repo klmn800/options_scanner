@@ -64,7 +64,7 @@ Morning failures are treated as fatal because the system needs OI data to functi
 1. Load KLMN 800 symbol list
 2. Fetch bulk quotes in batches of 100 symbols (one API call per batch)
 3. For each symbol: fetch expirations (1 API call), then fetch chain per expiration (1 API call each)
-4. Filter strikes to +/-20% of current price
+4. Filter strikes to +/-20% of current price **unioned with sticky contracts** (see Sticky Contract Preservation below)
 5. Filter expirations to max 60 DTE
 6. Buffer contracts, flush to database in batches
 
@@ -82,6 +82,17 @@ During insert, `op_storage.py` calculates time-series metrics by looking up prio
 - Building/unwinding direction: >10% = BUILDING, <-10% = UNWINDING, else STABLE
 
 **Note:** `oi_build_start_date` and `oi_build_start_price` are NOT populated during collection. They are always NULL until Phase 4 (Timing) runs.
+
+#### Sticky Contract Preservation (added 2026-05-20)
+
+Before the strike-range filter runs, `collect_symbol_oi()` queries `option_contracts` for distinct `(strike, expiration_date, option_type)` tuples for the symbol where `expiration_date >= today`. The filter keeps any chain option whose key is in that sticky set, **even if its strike falls outside the ±20% band**.
+
+Rationale: when a symbol moves >10%, a contract that was ATM yesterday can drift outside the band today and silently disappear from `option_contracts`. The sticky union preserves data continuity on contracts we already track, until they expire. Self-bounding — the sticky set only grows on symbols already experiencing enough movement to surface new strikes.
+
+- Helper: `_get_sticky_contracts(symbol)` (one query per symbol, no cache)
+- Filter: `_filter_strikes_by_range(options, underlying_price, expiration=, sticky_set=)`
+- Case: `option_contracts.option_type` is UPPERCASE, Tradier returns lowercase — both normalized to lowercase for the sticky key
+- Forward-looking only — contracts dropped before 2026-05-20 are not recovered
 
 ### Phase 2: Analysis (DEPRECATED -- skipped)
 
