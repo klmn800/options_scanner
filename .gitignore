@@ -14,7 +14,6 @@ client_secret_*.json
 *.db-shm
 *.db-wal
 Deprecated/
-memory/
 
 # Sensitive config (contains API keys)
 config.json
@@ -43,16 +42,13 @@ oracle/oracle_logs/
 # Autofix error queue (transient)
 autofix/errors/
 
-# Claude Code local settings
-.claude/
+# Claude Code: track shared hooks + settings.json; ignore local + state
+.claude/*
+!.claude/hooks/
+!.claude/settings.json
 plans/
 
-# Autonomous Claude Code agents (workspaces with their own .git repos)
-agents/system_analyst/
-agents/trading_advisor/
-agents/market_analyst/
-agents/earnings_researcher/
-agents/roundtable/
+# Agent workspaces are git submodules (tracked via .gitmodules), not ignored.
 
 # Multi-LLM council prototype (binary + experimental)
 ai_council/
