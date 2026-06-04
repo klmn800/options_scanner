@@ -2281,15 +2281,20 @@ class OrchestratorRunnersMixin:
             traceback.print_exc()
             return {'success': False, 'duration_seconds': time.time() - airline_start, 'error': str(e)}
 
-    def run_database_backup(self, backup_type="daily"):
+    def run_database_backup(self, backup_type="daily", tag=""):
         """Run database backup with enhanced theming
 
         Args:
             backup_type: 'daily' for datalake_backup.db or 'weekly' for datalake_backup_weekly.db
+            tag: optional label (e.g. "5.1 BG") prefixed onto every status-box title
+                 and log line so this backup's output stays identifiable when it
+                 runs on a background thread interleaved with other steps' output.
 
         Returns:
             dict: {'success': bool, 'duration_seconds': float, 'stdout': str}
         """
+        prefix = "[{}] ".format(tag) if tag else ""
+
         if backup_type == "weekly":
             title = "💾 WEEKLY DATABASE BACKUP"
             target = "datalake_backup_weekly.db"
@@ -2307,7 +2312,7 @@ class OrchestratorRunnersMixin:
             method = "SQLite native backup API with progress tracking"
 
         self.create_status_box(
-            title,
+            prefix + title,
             [
                 "Mission: Create secure backup of datalake.db",
                 "Target: {} (overwrites existing)".format(target),
@@ -2320,8 +2325,8 @@ class OrchestratorRunnersMixin:
         try:
             backup_script = os.path.join(project_root, 'data', 'health', 'db_backup.py')
             if not os.path.exists(backup_script):
-                self.beautiful_log("❌ BACKUP FAILED: Script not found: {}".format(backup_script), 'error')
-                self.create_status_box("💥 BACKUP SCRIPT MISSING", [
+                self.beautiful_log(prefix + "❌ BACKUP FAILED: Script not found: {}".format(backup_script), 'error')
+                self.create_status_box(prefix + "💥 BACKUP SCRIPT MISSING", [
                     "Cannot locate backup script",
                     "Expected: {}".format(backup_script),
                     "⚠️ No backup protection available"
@@ -2336,8 +2341,8 @@ class OrchestratorRunnersMixin:
                 weekly_backup = os.path.join(project_root, 'data', 'datalake_backup_weekly.db')
 
                 if not os.path.exists(source_backup):
-                    self.beautiful_log("❌ WEEKLY BACKUP FAILED: Daily backup not found", 'error')
-                    self.create_status_box("❌ WEEKLY BACKUP FAILED", [
+                    self.beautiful_log(prefix + "❌ WEEKLY BACKUP FAILED: Daily backup not found", 'error')
+                    self.create_status_box(prefix + "❌ WEEKLY BACKUP FAILED", [
                         "Daily backup not found: {}".format(source_backup),
                         "Weekly backup requires successful daily backup first",
                         "⚠️ Weekly recovery point not created"
@@ -2347,7 +2352,7 @@ class OrchestratorRunnersMixin:
                 # Chunked copy with progress reporting
                 source_size = os.path.getsize(source_backup)
                 source_size_gb = source_size / (1024 ** 3)
-                self.beautiful_log("Copying {:.1f} GB: {} -> {}".format(
+                self.beautiful_log(prefix + "Copying {:.1f} GB: {} -> {}".format(
                     source_size_gb, os.path.basename(source_backup), os.path.basename(weekly_backup)), 'info')
 
                 chunk_size = 64 * 1024 * 1024  # 64 MB chunks
@@ -2363,7 +2368,7 @@ class OrchestratorRunnersMixin:
                         bytes_copied += len(chunk)
                         copied_gb = bytes_copied / (1024 ** 3)
                         if copied_gb >= next_report_gb:
-                            logging.info("  Progress: {:.1f} / {:.1f} GB ({:.0f}%)".format(
+                            logging.info(prefix + "  Progress: {:.1f} / {:.1f} GB ({:.0f}%)".format(
                                 copied_gb, source_size_gb, (bytes_copied / source_size) * 100))
                             next_report_gb += 1
 
@@ -2417,13 +2422,13 @@ class OrchestratorRunnersMixin:
                     box_lines.append("Backup completed in {} min".format(backup_duration))
                 box_lines.append("Target: {}".format(target))
 
-                self.create_status_box("✅ BACKUP OPERATION COMPLETE", box_lines)
+                self.create_status_box(prefix + "✅ BACKUP OPERATION COMPLETE", box_lines)
                 return {'success': True, 'duration_seconds': backup_wall_clock, 'stdout': result.stdout or ''}
             else:
                 error_msg = result.stderr.strip() if result.stderr else "Unknown backup error"
-                self.beautiful_log("❌ DATABASE BACKUP FAILED: {}".format(error_msg), 'error')
+                self.beautiful_log(prefix + "❌ DATABASE BACKUP FAILED: {}".format(error_msg), 'error')
                 self.log_subprocess_error('db_backup.py', result)
-                self.create_status_box("❌ BACKUP OPERATION FAILED", [
+                self.create_status_box(prefix + "❌ BACKUP OPERATION FAILED", [
                     "Backup process unsuccessful",
                     "Error: {}".format(error_msg[:60]),
                     "⚠️ Proceeding without backup protection",
@@ -2441,8 +2446,8 @@ class OrchestratorRunnersMixin:
                 },
                 severity='ERROR'
             )
-            self.beautiful_log("❌ DATABASE BACKUP FATAL ERROR: {}".format(e), 'error')
-            self.create_status_box("💥 BACKUP PROCESS CRASHED", [
+            self.beautiful_log(prefix + "❌ DATABASE BACKUP FATAL ERROR: {}".format(e), 'error')
+            self.create_status_box(prefix + "💥 BACKUP PROCESS CRASHED", [
                 "Backup operation encountered fatal error",
                 "Error: {}".format(str(e)[:60]),
                 "⚠️ No backup available - manual intervention may be needed"

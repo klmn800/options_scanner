@@ -49,6 +49,7 @@ import sys
 import time
 import logging
 import argparse
+import threading
 
 # Set process priority to High (this is the primary function of this computer)
 if sys.platform == 'win32':
@@ -545,15 +546,38 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         if is_friday:
             self.phase_header("FRIDAY OPERATIONS", phase_number=5)
 
-            # Step 5.1: Database Backup - Weekly
-            self.coffee_break(60, "Daily backup complete - lock release before weekly backup", after_step="Autofix Review")
-            self.beautiful_log("Step 5.1: Database Backup (Weekly)", 'phase')
-            _t0 = time.time()
-            results['5.1 Weekly Backup'] = self.run_database_backup(backup_type="weekly")
-            step_durations['5.1 Weekly Backup'] = time.time() - _t0
+            # Step 5.1: Database Backup - Weekly (BACKGROUND)
+            # The weekly backup is a 1-2 GB sequential file copy
+            # (datalake_backup.db -> datalake_backup_weekly.db). It holds no DB
+            # lock and nothing downstream in this cycle reads either file
+            # (5.2 reads datalake.db, 5.3 writes it, 5.4 reads it + writes sector
+            # archives; the weekly file is only read on the NEXT Friday). So it
+            # runs off the critical path on a background thread and is joined
+            # after 5.4, just before the Day Summary. Output is tagged "[5.1 BG]"
+            # so it stays identifiable when interleaved with 5.2-5.4 output.
+            self.beautiful_log("Step 5.1: Database Backup (Weekly) — backgrounded", 'phase')
+            weekly_backup_holder = {}
+            _wb_spawn = time.time()
+
+            def _run_weekly_backup_bg():
+                _t0 = time.time()
+                try:
+                    result = self.run_database_backup(backup_type="weekly", tag="5.1 BG")
+                except Exception as e:
+                    # Never let a thread crash strand the join site with a KeyError.
+                    result = {'success': False, 'duration_seconds': time.time() - _t0, 'error': str(e)}
+                    logging.error("[5.1 BG] Weekly backup thread raised: %s", e)
+                weekly_backup_holder['result'] = result
+                weekly_backup_holder['duration'] = time.time() - _t0
+                logging.info("[5.1 BG] Weekly backup thread finished after %.1fs wall-clock", weekly_backup_holder['duration'])
+
+            weekly_backup_thread = threading.Thread(
+                target=_run_weekly_backup_bg, name="weekly-backup", daemon=False)
+            weekly_backup_thread.start()
+            logging.info("[5.1 BG] Thread spawned (tid=%s) — main flow continues to 5.2 immediately...",
+                         weekly_backup_thread.ident)
 
             # Step 5.2: FM Baseline Update
-            self.coffee_break(60, "Weekly backup complete - lock release before baseline update", after_step="Weekly Backup")
             self.beautiful_log("Step 5.2: FM Baseline Update (Friday)", 'phase')
             _t0 = time.time()
             results['5.2 FM Baseline'] = self.run_fm_baseline_update()
@@ -572,6 +596,25 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
             _t0 = time.time()
             results['5.4 Sector Archive'] = self.run_friday_sector_archive()
             step_durations['5.4 Sector Archive'] = time.time() - _t0
+
+            # Step 5.1 (cont.): Join the background weekly backup before Day Summary.
+            # Must stay after the last step (5.4) that does not read the weekly
+            # backup file. If a future Friday step starts reading
+            # datalake_backup_weekly.db mid-cycle, move this join above it.
+            if weekly_backup_thread.is_alive():
+                self.beautiful_log("[5.1 BG] Weekly backup still running — blocking until it finishes...", 'info')
+            else:
+                self.beautiful_log("[5.1 BG] Weekly backup already finished — reconciling result.", 'info')
+            weekly_backup_thread.join()
+            results['5.1 Weekly Backup'] = weekly_backup_holder.get(
+                'result', {'success': False, 'duration_seconds': 0, 'error': 'thread produced no result'})
+            step_durations['5.1 Weekly Backup'] = weekly_backup_holder.get('duration', 0)
+            _wb_ok = results['5.1 Weekly Backup'].get('success')
+            self.beautiful_log(
+                "[5.1 BG] Joined. Backup {} in {:.1f}s (wall-clock from spawn-to-join: {:.1f}s)".format(
+                    "SUCCESS" if _wb_ok else "FAILED",
+                    step_durations['5.1 Weekly Backup'], time.time() - _wb_spawn),
+                'info' if _wb_ok else 'error')
         else:
             self.beautiful_log("Phase 5: Weekly operations skipped (not Friday)", 'info')
 
