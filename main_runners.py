@@ -271,12 +271,21 @@ class OrchestratorRunnersMixin:
             ]
         )
 
+        # Assign trade_date BEFORE the try block so the except handler can always
+        # reference it. The OPOrchestrator constructor performs a Tradier
+        # connection test that can raise on a transient API failure (e.g. a
+        # spurious 401 "Invalid Access Token" that self-heals within minutes). If
+        # trade_date were assigned inside the try (after construction), that early
+        # failure would make the error handler's handle_error() call throw
+        # UnboundLocalError on trade_date — masking the real error and escalating a
+        # recoverable blip into a main_fatal_error that kills the orchestrator.
+        trade_date = eastern_date_string()
+
         try:
             # Initialize Option Pipeline orchestrator
             op = OPOrchestrator(no_interaction=True)
 
             # Run the pipeline
-            trade_date = eastern_date_string()
             results = op.run_pipeline(
                 trade_date=trade_date,
                 symbol=None,  # Full universe
@@ -719,12 +728,21 @@ class OrchestratorRunnersMixin:
             ]
         )
 
+        # Assign trade_date BEFORE the try block so the except handlers can always
+        # reference it. OPOrchestrator(no_interaction=True) below performs a Tradier
+        # connection test that can raise on a transient API failure (e.g. a spurious
+        # 401 "Invalid Access Token"). If trade_date were assigned inside the try
+        # (after construction), that early failure would make the error handlers'
+        # handle_error() calls throw UnboundLocalError on trade_date — masking the
+        # real error and escalating a recoverable blip into a main_fatal_error that
+        # kills the orchestrator. Mirrors the morning pipeline fix (2026-06-04).
+        trade_date = eastern_date_string()
+
         try:
             # Initialize Option Pipeline orchestrator
             op = OPOrchestrator(no_interaction=True)
 
             # Run the pipeline
-            trade_date = eastern_date_string()
             results = op.run_pipeline(
                 trade_date=trade_date,
                 symbol=None,  # Full universe

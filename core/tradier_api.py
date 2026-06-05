@@ -248,14 +248,57 @@ class TradierAPI:
             logging.error(f"Request failed: {e}")
             return None
     
-    def test_connection(self):
-        """Test API connection and authentication"""
-        try:
-            response = self._make_request('GET', 'user/profile', self.standard_data_limiter)
-            return response is not None
-        except Exception as e:
-            logging.error(f"Connection test failed: {e}")
-            return False
+    def test_connection(self, max_attempts=5, backoff_schedule=(3, 6, 12, 24)):
+        """Test API connection and authentication, retrying transient failures.
+
+        Tradier's API gateway (Apigee) intermittently returns spurious
+        401 "Invalid Access Token" / transient errors that self-heal within a
+        minute or two even though the access token is valid. A single-shot probe
+        made the whole orchestrator drop to weekday-fallback (losing holiday
+        detection for the day) and cascaded into pipeline init crashes
+        (market_calendar_init_failed -> op_pipeline_fatal_error). We therefore
+        retry the profile probe a few times with backoff before declaring the
+        connection dead. A genuinely invalid token simply fails every attempt and
+        returns False after ~45s, same outcome as before but resilient to blips.
+
+        Args:
+            max_attempts: total number of probe attempts (>=1).
+            backoff_schedule: seconds to sleep between attempts; the last value is
+                reused if there are more gaps than entries.
+
+        Returns:
+            True if any attempt succeeds, False if all attempts fail.
+        """
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = self._make_request('GET', 'user/profile', self.standard_data_limiter)
+                if response is not None:
+                    if attempt > 1:
+                        logging.warning(
+                            f"Tradier connection test succeeded on attempt "
+                            f"{attempt}/{max_attempts} (transient failure self-healed)"
+                        )
+                    return True
+            except Exception as e:
+                last_error = e
+                logging.error(f"Connection test attempt {attempt}/{max_attempts} raised: {e}")
+
+            if attempt < max_attempts:
+                delay = backoff_schedule[min(attempt - 1, len(backoff_schedule) - 1)]
+                logging.warning(
+                    f"Tradier connection test failed (attempt {attempt}/{max_attempts}); "
+                    f"retrying in {delay}s"
+                )
+                time.sleep(delay)
+
+        if last_error is not None:
+            logging.error(f"Tradier connection test failed after {max_attempts} attempts: {last_error}")
+        else:
+            logging.error(
+                f"Tradier connection test failed after {max_attempts} attempts (no valid response)"
+            )
+        return False
     
     # Market Data Endpoints
     
