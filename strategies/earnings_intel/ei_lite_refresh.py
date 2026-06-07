@@ -354,6 +354,11 @@ def _spawn_earnings_researcher(dispute_count):
     Uses a temp batch file to avoid cmd.exe /k quoting issues with multiple
     quoted paths (cmd /k "prog" "arg" mangles the middle quotes).
     """
+    from tools.agent_toggle import is_agent_enabled
+    if not is_agent_enabled('earnings_researcher'):
+        logging.info("   Earnings researcher disabled in config.json — skipping auto-spawn")
+        return
+
     launcher_path = os.path.join(project_root, 'agents', 'earnings_researcher', 'launcher.py')
     if not os.path.exists(launcher_path):
         logging.info("   Earnings researcher agent not installed — skipping auto-spawn")

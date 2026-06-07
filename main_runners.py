@@ -1020,6 +1020,11 @@ class OrchestratorRunnersMixin:
 
         Returns status string for the completion log.
         """
+        from tools.agent_toggle import is_agent_enabled
+        if not is_agent_enabled('trading_advisor'):
+            self.beautiful_log("Trading Advisor disabled in config.json — skipping launch", 'info')
+            return "Disabled in config"
+
         try:
             bat_file = os.path.join(project_root, 'agents', 'trading_advisor', 'trade_morning.bat')
             if not os.path.exists(bat_file):
