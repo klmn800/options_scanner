@@ -818,6 +818,11 @@ class EarningsCollector:
 
         try:
             perf_db_path = os.path.join(project_root, 'data', 'performance.db')
+            # Ensure the table exists (canonical schema lives in
+            # performance_writer.ensure_schema; this self-heals on a rebuilt DB
+            # before Phase 6 runs).
+            from tools.performance_writer import ensure_schema
+            ensure_schema(perf_db_path)
             conn = sqlite3.connect(perf_db_path, timeout=30)
             conn.execute("PRAGMA busy_timeout = 30000")
             conn.execute("PRAGMA journal_mode = WAL")

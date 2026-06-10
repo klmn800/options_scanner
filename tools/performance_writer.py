@@ -27,7 +27,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 
 def ensure_schema(db_path=None):
-    """Create performance.db and all 15 tables if they don't exist.
+    """Create performance.db and all 17 tables if they don't exist.
 
     Args:
         db_path: Path to performance database. Defaults to data/performance.db.
@@ -430,6 +430,30 @@ def ensure_schema(db_path=None):
                 baselines_updated   INTEGER,
                 error_count         INTEGER DEFAULT 0,
                 recorded_at         TEXT NOT NULL
+            )
+        """)
+
+        # Table 17: earnings_date_disputes
+        # Written intraday by ei_collector._write_confirmed_disputes() and
+        # ei_lite_refresh.py; read by the earnings_researcher agent launcher.
+        # Lives here (not just in EXECUTION_PLAN's one-time DDL) so it survives
+        # a performance.db rebuild — see the June 2026 reformat that dropped it.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS earnings_date_disputes (
+                trade_date      TEXT NOT NULL,
+                symbol          TEXT NOT NULL,
+                db_date         TEXT,
+                db_time         TEXT,
+                yfinance_date   TEXT,
+                finnhub_date    TEXT,
+                dispute_reason  TEXT,        -- 'date_disagreement', 'unknown_time', 'both', 'confirmed_row_diverged'
+                resolution      TEXT,        -- 'confirmed_ben', 'confirmed_agent', 'unresolved', 'skipped'
+                resolved_date   TEXT,
+                resolved_time   TEXT,
+                resolved_at     TEXT,
+                research_url    TEXT,
+                notes           TEXT,
+                PRIMARY KEY (trade_date, symbol)
             )
         """)
 

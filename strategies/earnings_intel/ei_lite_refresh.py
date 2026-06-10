@@ -297,6 +297,11 @@ def run_lite_refresh(db_path=None, perf_db_path=None, days_ahead=21, spawn_agent
     # Write disputes to performance.db
     if disputes:
         try:
+            # Ensure the table exists (it lives in performance.db's canonical
+            # schema; this self-heals if the DB was rebuilt and Phase 6 hasn't
+            # run yet today).
+            from tools.performance_writer import ensure_schema
+            ensure_schema(perf_db)
             conn = sqlite3.connect(perf_db, timeout=30)
             conn.execute("PRAGMA busy_timeout = 30000")
             conn.execute("PRAGMA journal_mode = WAL")
