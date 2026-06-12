@@ -252,46 +252,29 @@ def _step_insert_metadata(symbol, data, tier, archive_db, db_path):
 
 
 def _step_backfill_prices(symbol, db_path):
-    """Step 2: Backfill historical_prices (~1 year)."""
-    try:
-        from data.tradier_historical_backfill import backfill_symbol
-        count = backfill_symbol(symbol, db_path)
-        return f'done  ({count} rows)' if count else 'done  (0 rows)'
-    except ImportError:
-        # Fallback: use TradierAPI directly
-        from core.tradier_api import TradierAPI
-        token = _load_tradier_token()
-        api = TradierAPI(token)
-        from datetime import timedelta
-        end = now_eastern().strftime('%Y-%m-%d')
-        start = (now_eastern() - timedelta(days=365)).strftime('%Y-%m-%d')
+    """Step 2: Backfill historical_prices (~1 year) via Tradier.
 
-        resp = api.get_historical_quotes(symbol, start_date=start, end_date=end)
-        if not resp or 'history' not in resp:
-            return 'done  (0 rows - no history)'
+    Uses the shared fetch/store helpers in tradier_historical_backfill, which
+    already handle null history (thin/new tickers return {'history': None}),
+    missing keys, and the dict-vs-list shape of the 'day' field.
+    """
+    from datetime import timedelta
+    from core.tradier_api import TradierAPI
+    from data.tradier_historical_backfill import (
+        fetch_historical_tradier, process_and_store_data,
+    )
 
-        days = resp['history'].get('day', [])
-        if isinstance(days, dict):
-            days = [days]
+    token = _load_tradier_token()
+    api = TradierAPI(token)
+    end = now_eastern().strftime('%Y-%m-%d')
+    start = (now_eastern() - timedelta(days=365)).strftime('%Y-%m-%d')
 
-        with sqlite3.connect(db_path, timeout=30.0) as conn:
-            inserted = 0
-            for day in days:
-                try:
-                    conn.execute('''
-                        INSERT OR IGNORE INTO historical_prices
-                        (symbol, trade_date, open_price, high_price, low_price,
-                         close_price, volume)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        symbol, day.get('date'), day.get('open'), day.get('high'),
-                        day.get('low'), day.get('close'), day.get('volume')
-                    ))
-                    inserted += 1
-                except Exception:
-                    pass
-            conn.commit()
-        return f'done  ({inserted} rows)'
+    days = fetch_historical_tradier(api, symbol, start, end)
+    if not days:
+        return 'done  (0 rows - no history)'
+
+    inserted = process_and_store_data(symbol, days, db_path)
+    return f'done  ({inserted} rows)'
 
 
 def _step_backfill_earnings(symbol, db_path):
