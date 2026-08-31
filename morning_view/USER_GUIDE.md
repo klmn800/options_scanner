@@ -20,9 +20,9 @@
 
 ### Morning Routine (5 minutes)
 
-**1. Check Your Email (7:30 AM)**
-- Morning Views sends daily watchlist email with .docx attachment
-- Top 20 symbols ranked by confluence score
+**1. Launch the TUI**
+- `python morning_view/mv_main.py`
+- Discovery screen ranks top symbols by confluence score
 - Shows: OI bias, conviction level, catalysts, alerts
 
 **2. Review Watchlist**
@@ -62,7 +62,7 @@ Morning Views is a **daily options watchlist system** that:
 1. Scans 800 symbols (KLMN universe) for option activity
 2. Ranks top 20 by confluence of signals
 3. Shows OI positioning, timing, and Greek exposures
-4. Delivers actionable watchlist via email
+4. Presents it in the Morning View TUI
 
 ### Data Strategy: Hybrid Approach
 
@@ -83,13 +83,12 @@ This gives you the **most accurate morning picture**:
 ```
 6:35 AM  → OID morning scan (updates OI only)
 7:20 AM  → Query database sync (datalake → datalake_query)
-7:30 AM  → Morning Views generation (creates SQL views + email)
+7:30 AM  → SQL views recreated after sync (the TUI reads these)
 ```
 
 **Manual Execution:**
 ```bash
-cd morning_view
-python morning_views.py
+python morning_view/mv_main.py
 ```
 
 ---
@@ -469,7 +468,7 @@ Identifies price levels where significant trading occurred historically. These r
 - POC is the strongest support/resistance level
 
 **Integrated into Symbol Detail:**
-Volume profile automatically appears when viewing symbol details (see `python morning_views.py --symbol NVDA`). Shows:
+Volume profile automatically appears when viewing symbol details (see the Symbol Detail screen). Shows:
 - Current price context (above/below/within value area)
 - Distance from POC (%)
 - Top 3 HVN levels (price magnets)
@@ -767,7 +766,7 @@ SELECT COUNT(*) FROM v_morning_watchlist;
 ```bash
 # Re-run morning views manually
 cd morning_view
-python morning_views.py
+python mv_main.py
 
 # Or re-run full morning pipeline
 python main.py --oid-morning
@@ -799,8 +798,8 @@ LIMIT 1;
 **Cause:** Views using wrong date filter (should be TODAY for OI)
 
 **Fix:** Already fixed in v2.0 (hybrid data strategy). If still seeing issue:
-1. Check morning_views.py uses self-join with `WHERE s_today.trade_date = DATE('now')`
-2. Re-run morning_views.py
+1. Check the view SQL in morning_views.py uses a self-join with `WHERE s_today.trade_date = DATE('now')`
+2. Recreate the views (relaunch the TUI, or instantiate MorningViews)
 
 ---
 
@@ -1091,7 +1090,7 @@ ORDER BY trade_date;
 
 **Possible Improvements:**
 1. Real-time volume tracking during market hours
-2. Volume surge alerts in morning email
+2. Volume surge alerts
 3. IV rank/percentile in v_option_comparison
 4. Historical win rate for similar setups
 5. Position sizing recommendations based on confluence score
@@ -1106,7 +1105,7 @@ If anything is unclear, incomplete, or needs more examples, please provide feedb
 ## Quick Reference Card
 
 ### Daily Checklist
-- [ ] Check morning email (7:30 AM)
+- [ ] Launch the TUI: `python morning_view/mv_main.py`
 - [ ] Review watchlist: `SELECT * FROM v_morning_watchlist LIMIT 5`
 - [ ] Pick 1-2 symbols to deep dive
 - [ ] Check OI timing: `SELECT * FROM v_oi_timing_context WHERE symbol='XXX'`

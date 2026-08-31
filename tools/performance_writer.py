@@ -300,7 +300,8 @@ def ensure_schema(db_path=None):
             )
         """)
 
-        # Table 9: morning_views_performance
+        # Table 9: morning_views_performance (Step 1.6 removed 2026-08-31;
+        # table kept for historical rows, no writer remains)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS morning_views_performance (
                 trade_date          TEXT NOT NULL PRIMARY KEY,
@@ -1104,25 +1105,6 @@ def _write_subprocess_tables(cursor, trade_date, day_of_week, recorded_at,
              parsed.get('betas_calculated'),
              parsed.get('db_writes_successful'),
              parsed.get('db_writes_failed'),
-             recorded_at)
-        )
-        rows += 1
-
-    # Table 9: morning_views_performance
-    mv_result = results.get('1.6 Morning Views')
-    if mv_result is not None and mv_result != 'skipped':
-        email_sent = None
-        if isinstance(mv_result, dict) and mv_result.get('stdout'):
-            email_sent = 1 if 'emailed successfully' in mv_result['stdout'].lower() else 0
-
-        cursor.execute(
-            "INSERT OR REPLACE INTO morning_views_performance "
-            "(trade_date, day_of_week, duration_seconds, success, email_sent, recorded_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (trade_date, day_of_week,
-             _r(step_durations.get('1.6 Morning Views')),
-             _result_success(mv_result),
-             email_sent,
              recorded_at)
         )
         rows += 1

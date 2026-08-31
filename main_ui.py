@@ -148,7 +148,6 @@ class OrchestratorUIMixin:
             row("  1.3  Metadata Collection")
             row("  1.4  Trade Ingest")
             row("  1.5  Query Database Sync")
-            row("  1.6  Morning Views (email)")
             blank()
             row("Phase 2: Flow Monitor (9:15 AM - 5:00 PM)")
             row("  2.1  Pre-Market Setup")

@@ -5,7 +5,7 @@ Full inbox access for the options scanner system. Used by Claude Code
 to check for messages from Ben, newsletter subscriptions, etc.
 
 This is a READ-ONLY tool by design. No send capability.
-Outbound email is handled by email_notifier.py and document_emailer.py.
+Outbound email is handled by email_notifier.py.
 
 Usage:
     python tools/email_reader.py --auth                  # Run/verify OAuth flow

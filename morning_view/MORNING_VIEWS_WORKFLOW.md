@@ -1,5 +1,7 @@
 # Morning Views Workflow
 
+> **Historical (2026-08-31):** The emailed-watchlist workflow this document describes was removed. `morning_views.py` now only owns the TUI view schema (user_watchlist table + the 5 SQL views); the view-creation sections below still reflect how those views work.
+
 This diagram shows the Morning Views generation process that creates and emails the daily options watchlist.
 
 **Last Updated:** 2025-11-17

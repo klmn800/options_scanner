@@ -65,7 +65,6 @@ These are invoked on-demand by Ben or Claude Code for analysis, maintenance, and
 |------|---------|-------|
 | `email_reader.py` | Gmail API reader for klmn800alerts@gmail.com | `python tools/email_reader.py --check` |
 | `email_digester.py` | Spawns Claude Code (Haiku) to extract knowledge from inbox | `python tools/email_digester.py` |
-| `document_emailer.py` | Email documents/reports with safety controls | Imported by Morning View |
 
 `email_reader.py` requires OAuth2 token (`gmail_token.json`). See CLAUDE.md for full CLI reference.
 

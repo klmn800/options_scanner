@@ -10,7 +10,6 @@ Clean Architecture:
            - Earnings Intelligence (signals, watchlist, news, arbitrage)
            - Metadata Collection Pipeline
            - Query Database Sync (morning data + metadata)
-           - Morning Views (emailed watchlist)
   9:15 AM  - Flow Monitor Market Hours starts — Cycle 1 pre-open scan (captures pre-market values)
   9:30 AM  - Flow Monitor Cycle 2+ — real-time monitoring through 4:00 PM
   4:00 PM  - Flow Monitor Market Close
@@ -166,7 +165,6 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         'Metadata Collection',
         'Trade Ingest',
         'Query Database Sync (Morning)',
-        'Morning Views',
         'Flow Monitor',
         'Trade Ingest (Post-Market)',
         'Evening Option Pipeline',
@@ -430,7 +428,7 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
             self.beautiful_log("Mid-day start ({}) - skipping to Phase 2".format(now.strftime("%I:%M %p")), 'phase')
             for key in ['1.1 Morning Option Pipeline', '1.2 Earnings Intelligence',
                         '1.3 Metadata Collection', '1.4 Trade Ingest',
-                        '1.5 Query Sync (Morning)', '1.6 Morning Views']:
+                        '1.5 Query Sync (Morning)']:
                 results[key] = 'skipped'
 
         # Before 9:00 AM → Run morning sequence
@@ -474,14 +472,6 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
             results['1.5 Query Sync (Morning)'] = self.run_query_database_sync()
             step_durations['1.5 Query Sync (Morning)'] = time.time() - _t0
 
-            # Brief pause before morning views
-            self.coffee_break(60, "Morning cuppa to go with the news", after_step="Query Database Sync (Morning)")
-
-            # Step 1.6: Morning Views Generation
-            self.beautiful_log("Step 1.6: Morning Views Generation", 'phase')
-            _t0 = time.time()
-            results['1.6 Morning Views'] = self.run_morning_views()
-            step_durations['1.6 Morning Views'] = time.time() - _t0
 
         # ── Phase 2: Flow Monitor ──
         self.phase_header("FLOW MONITOR", phase_number=2)
@@ -664,8 +654,6 @@ Testing with Time Simulation (auto-expires after 4 hours by default):
                            help='Run Flow Monitor only')
     mode_group.add_argument('--earnings-intel', action='store_true',
                            help='Run Earnings Intelligence pipeline only')
-    mode_group.add_argument('--morning-views', action='store_true',
-                           help='Run morning views generation only')
     mode_group.add_argument('--sector-archive', action='store_true',
                            help='Run sector-based database archive only')
     mode_group.add_argument('--database-backup', action='store_true',
@@ -745,9 +733,6 @@ def main():
         elif args.earnings_intel:
             orchestrator.print_banner("earnings-intel")
             success = orchestrator.run_earnings_intelligence()
-        elif args.morning_views:
-            orchestrator.print_banner("morning-views")
-            success = orchestrator.run_morning_views()
         elif args.sector_archive:
             orchestrator.print_banner("sector-archive")
             success = orchestrator.run_sector_archive()

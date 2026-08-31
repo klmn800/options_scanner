@@ -226,7 +226,7 @@ Use `from tools.decimal_formatter import clean_database_row` before all INSERT/U
 ## Coordination and Scheduling
 
 ### Daily Schedule
-- **Phase 1** (6:35 AM): Pre-market — OP, EI, Metadata, Trade Ingest, Sync, Views
+- **Phase 1** (6:35 AM): Pre-market — OP, EI, Metadata, Trade Ingest, Sync
 - **Phase 2** (9:15 AM): Flow Monitor — pre-market, market hours (~15-20 cycles), post-market
 - **Phase 3** (5:00 PM): Evening — Trade Ingest, OP, Final Sync
 - **Phase 4**: Daily Backup, Autofix Review
@@ -239,7 +239,7 @@ Single daily cycle, launched by Task Scheduler every weekday. Holiday detection 
 
 ### Key Architectural Facts
 - Symbol universe: ~820 active symbols in `core/symbols_klmn800.py`. Use `symbol_lifecycle.py` to add/remove.
-- Orchestrator order: 1.1 OP → 1.2 EI → 1.3 Meta → 1.4 TradeIngest → 1.5 Sync → 1.6 Views → 2. FM → 3.1 TradeIngest → 3.2 OP → 3.4 Sync → 4.1 Backup → 4.2 Autofix → 5.x Friday → 6.1 Perf
+- Orchestrator order: 1.1 OP → 1.2 EI → 1.3 Meta → 1.4 TradeIngest → 1.5 Sync → 2. FM → 3.1 TradeIngest → 3.2 OP → 3.4 Sync → 4.1 Backup → 4.2 Autofix → 5.x Friday → 6.1 Perf
 - `run_*()` in `main_runners.py` return structured dicts (`{'success': bool, ...}`), not bools
 
 ---
