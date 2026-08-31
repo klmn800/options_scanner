@@ -83,7 +83,7 @@ Both strategies operate **independently** and collect data **directly from Tradi
 | Table | Writer | Primary Readers | Update Frequency | Purpose |
 |-------|--------|-----------------|------------------|---------|
 | **flow_options_scans** | Flow Monitor | Flow Monitor analyzer | ~20min during market | Raw intraday contract snapshots |
-| **flow_alerts** | Flow Monitor | Oracle, Analysis tools | ~20min during market | Significant institutional flows |
+| **flow_alerts** | Flow Monitor | Analysis tools | ~20min during market | Significant institutional flows |
 | **flow_symbol_summary** | Flow Monitor | Analysis tools | 1x per trade_date (EOD) | Daily alert metrics by symbol |
 | **option_contracts** | Option Pipeline | Option Pipeline (time series), Earnings Intel, Analysis | 1x per trade_date | Daily OI/IV/Greek baseline |
 | **option_symbol_summary** | Option Pipeline | Earnings Intel, Airline Play, Analysis | 1x per trade_date | Symbol-level OI/IV aggregations |
@@ -125,7 +125,6 @@ Both strategies use **±20% strike ranges** for consistency:
 
 **Indirect relationships:**
 - **Earnings Intel** reads from `option_symbol_summary` (Option Pipeline) for IV metrics
-- **Oracle** queries both `flow_alerts` and `option_contracts` for comprehensive analysis
 - **Analysis tools** may join data from both strategies for multi-dimensional views
 
 ## Why Separate Tables?

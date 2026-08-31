@@ -36,7 +36,7 @@ Alpha Vantage NEWS_SENTIMENT endpoint client. Strict budget: **25 calls/day** on
 ---
 
 ### `symbols_klmn800.py` - Symbol Universe Definition
-The single source of truth for the ~800-symbol KLMN universe. The most widely imported file in the project (~20 importers across strategies, data, oracle, and tools).
+The single source of truth for the ~800-symbol KLMN universe. The most widely imported file in the project (~20 importers across strategies, data, and tools).
 
 **Key exports:**
 - `KLMN_800_SYMBOLS` - Complete list (~800 symbols): S&P 500 + Russell selections + NASDAQ + preferred + ETFs + airlines
@@ -45,7 +45,7 @@ The single source of truth for the ~800-symbol KLMN universe. The most widely im
 - `KLMN_800_SP500_COMPONENT`, `KLMN_800_RUSSELL_COMPONENT`, `KLMN_800_NASDAQ_COMPONENT` - Component lists
 - `KLMN_PREFERRED`, `ETF_SYMBOLS`, `AIRLINE_PLAY_SYMBOLS` - Specialty sublists
 
-**Used by:** Option Pipeline, Flow Monitor, Earnings Intel, Oracle, data backfill, news sentiment, symbol metadata
+**Used by:** Option Pipeline, Flow Monitor, Earnings Intel, data backfill, news sentiment, symbol metadata
 
 **Normal behavior:** This is a static data file. It should only change when Ben intentionally adds/removes symbols. The "purgatory list" at the bottom contains 58 symbols removed for low liquidity (July 2025).
 
@@ -65,7 +65,6 @@ Empty package init. Allows `from core.xxx import ...` syntax.
 - Strategy-specific logic (goes in `strategies/`)
 - One-off tools and utilities (goes in `tools/`)
 - Database operations (goes in `data/`)
-- Analysis or AI logic (goes in `oracle/`)
 
 ## Deprecated/
 

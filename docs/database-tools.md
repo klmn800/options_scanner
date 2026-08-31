@@ -32,40 +32,6 @@ python tools/direct_db_query.py --db archive_2025_07.db --sql "SELECT COUNT(*) F
 - Multi-query batch operations
 - Structured JSON output for programmatic processing
 
-## Oracle Bridge
-
-**Tool**: `oracle_bridge.py` - Natural language to SQL with Vanna AI
-
-### Basic Usage
-
-```bash
-# Default mode - raw SQL results only (fast, cheap ~$0.0008 per query)
-python oracle_bridge.py "Show me all NVDA alerts from today"
-
-# Full analysis mode with Sonnet interpretation (expensive ~$0.006 per query)
-python oracle_bridge.py --analyze "Analyze the market conditions that led to high-profit alerts"
-```
-
-**Response Format:**
-```json
-{
-  "success": true,
-  "sql_generated": "SELECT * FROM flow_alerts WHERE symbol = 'NVDA' AND DATE(alert_timestamp) = DATE('now')",
-  "results": [...],
-  "row_count": 5
-}
-```
-
-### When to Use
-- Exploratory questions when you don't know exact schema
-- Natural language queries for complex filtering
-- When schema inspection alone is insufficient
-
-### When NOT to Use
-- Schema exploration (use PRAGMA or direct_db_query.py)
-- File system tasks (Oracle only accesses database)
-- Simple lookups (Read tool is more efficient)
-
 ## Key Database Tables Reference
 
 ### Flow Alerts & Market Data
@@ -100,47 +66,13 @@ python oracle_bridge.py --analyze "Analyze the market conditions that led to hig
 ## Best Practices
 
 ### General Guidelines
-1. **Use direct_db_query.py by default** - Faster and more predictable than Oracle
+1. **Use direct_db_query.py by default**
 2. **Query database for analysis** - Use `datalake_query.db` (default), not `datalake.db`
 3. **Batch related queries** - More efficient than multiple single queries
 4. **Cache awareness** - Results cached for 1 hour (historical queries 24 hours)
 5. **Verify column names** - Check schema first for complex queries
 
-### Oracle-Specific
-1. **Be specific with table/column names** - Helps Vanna generate accurate SQL
-2. **Use raw mode by default** - Claude Code can analyze results itself
-3. **Cost awareness** - Each query has a cost (~$0.0008), avoid redundant calls
-
-## Common Query Patterns
-
-### Market Regime Analysis
-```bash
-python oracle_bridge.py "When was the last Bull market day and what alerts were generated?"
-```
-
-### Open Interest Analysis
-```bash
-python oracle_bridge.py "Show me the top 10 symbols by total open interest today"
-```
-
-### Performance Tracking
-```bash
-python oracle_bridge.py "What percentage of alerts from last week were profitable after 7 days?"
-```
-
-### Volatility Analysis
-```bash
-python oracle_bridge.py "How many high volatility days (VIX > 30) occurred this month?"
-```
-
 ## Error Handling
-
-### Oracle SQL Errors
-If Oracle returns SQL errors or unexpected results:
-1. Check column names against schema documentation
-2. Verify table names are spelled correctly
-3. Be more specific with natural language descriptions
-4. Consider breaking complex queries into simpler parts
 
 ### Database Locking
 If queries fail during collection windows:

@@ -2,7 +2,6 @@
 cache/
 python/
 __pycache__/
-vanna-main/
 .claude/
 chrome_extension/
 chrome_extension2/
@@ -11,8 +10,6 @@ options_scanner.egg-info/
 
 # Large files
 *.log
-ollama-windows-amd64.exe
-chat_server.log
 
 # Temporary files
 *.tmp

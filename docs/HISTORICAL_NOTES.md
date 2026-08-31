@@ -162,3 +162,11 @@ powershell> Get-Disk | Where-Object Number -eq 0
 - A failure is a failure — no classification into types. Verbose debug logging explains the why; stats just count the what.
 - OI completeness is the primary concern, not Greeks. Greeks coercion (null→0.0) remains unchanged.
 - `health_status` label (HEALTHY/DEGRADED/CRITICAL) kept internally for backward compat but no longer displayed in completion boxes — replaced by actual numbers.
+
+## Oracle Retired (2026-08-31)
+
+**What it was:** The project's first attempt at AI-assisted database analysis (2025). Three parts: `oracle/oracle_vanna.py` — Vanna AI (FAISS RAG over table schemas) generating SQL from natural-language questions, answered by Claude Haiku; `oracle/claude_api.py` — a Claude API wrapper with function-calling for deeper analysis passes; `oracle/ollama/` — a local-LLM chat prototype. `tools/oracle_bridge.py` exposed it programmatically, and the Morning View AI analyzer used it for a "Round 3" historical-exploration pass.
+
+**Why it was retired:** The text-to-SQL framing oversimplified the analysis problem. Generating one SQL statement from one question produced shallow, error-prone answers on a 60+ table schema with domain gotchas (point-in-time OI, two-database workflow, lowercase option types). What replaced it in practice — direct SQL via `tools/direct_db_query.py` for humans, and schema-aware Claude Code agents with real database tools for autonomous analysis — handles multi-step reasoning, verification, and context the Vanna pipeline never could. Superseded in 2025; the code sat unused until its removal here. The Morning View analyzer's Round 3 was removed with it (now a 3-round framework; the synthesis round keeps its `round_4` internal name for log continuity).
+
+**Removed:** `oracle/` (5,535 lines), `tools/oracle_bridge.py`, `docs/reference/VANNA_SLIM_REFERENCE.md`, the `oracle` config key, and text references throughout the docs.

@@ -60,7 +60,7 @@ You operate with **full autonomy** but must stay within these boundaries:
    - ❌ Don't change function signatures without checking all callers
    - ❌ Don't reorganize directory structures
 
-**Focus your fixes on**: `strategies/`, `tools/` (non-core), `oracle/`, `morning_view/`.
+**Focus your fixes on**: `strategies/`, `tools/` (non-core), `morning_view/`.
 
 ### ✅ REQUIRED - Safety Validations:
 

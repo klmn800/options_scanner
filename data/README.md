@@ -13,7 +13,7 @@ This directory houses all SQLite databases, database maintenance scripts, and da
 | `datalake.db` | Primary production database. Written to by all collection pipelines. | ~9 GB |
 | `datalake_query.db` | Read-only analysis copy. Synced 3x daily from datalake.db. | ~9 GB |
 
-**Two-database workflow:** Production pipelines write to `datalake.db`. All analysis, Claude Code queries, Oracle, and reporting tools read from `datalake_query.db`. This prevents locking conflicts between collection and analysis.
+**Two-database workflow:** Production pipelines write to `datalake.db`. All analysis, Claude Code queries and reporting tools read from `datalake_query.db`. This prevents locking conflicts between collection and analysis.
 
 **Do not query `datalake.db` during collection windows** (6:30-8:00 AM, 4:30-6:00 PM). Use `datalake_query.db` instead.
 
@@ -28,7 +28,7 @@ This directory houses all SQLite databases, database maintenance scripts, and da
 
 | File | Purpose |
 |------|---------|
-| `analysis_cache.db` | Oracle AI analysis cache (symbol_ai_analysis table) |
+| `analysis_cache.db` | AI analysis cache (symbol_ai_analysis table) |
 
 ### WAL Files
 

@@ -465,7 +465,7 @@ def atomic_rename_with_retry(temp_path, target_path, max_wait_seconds=90):
     print("   Target file: {}".format(target_path), flush=True)
     print("   Last error: {}".format(last_error), flush=True)
     print("   Timeout used: {}s".format(max_wait), flush=True)
-    print("   Recommendation: Check if analysis tools (Morning View TUI, direct_db_query.py, Oracle) are running", flush=True)
+    print("   Recommendation: Check if analysis tools (Morning View TUI, direct_db_query.py) are running", flush=True)
 
     return False, last_error
 
@@ -1365,7 +1365,7 @@ def create_query_sync(interactive=True, retry_attempt=0, max_retries=3):
                 print("   - Long-running analysis query in progress")
                 print("   - Morning View TUI open with database connection")
                 print("   - direct_db_query.py running")
-                print("   - Oracle or other analysis tool running")
+                print("   - Another analysis tool running")
                 print()
                 print("   Try: Close analysis tools and retry, or wait for them to finish")
                 print("=" * 70)
@@ -1459,7 +1459,7 @@ def create_query_sync(interactive=True, retry_attempt=0, max_retries=3):
 
     # LOCK COORDINATION FIX (2025-12-16 Batch Fix)
     # Create sync lock file to coordinate with concurrent readers
-    # This prevents Morning View, Oracle, and other tools from opening the query DB
+    # This prevents Morning View and other tools from opening the query DB
     # during the critical rename window, eliminating the WinError 32 race condition
     sync_lock_file = "data/.datalake_query_sync_in_progress"
     try:
@@ -1570,7 +1570,7 @@ def create_query_sync(interactive=True, retry_attempt=0, max_retries=3):
         # Switch the target to DELETE journal + synchronous=NORMAL for the duration of the
         # backup. Lock file already prevents concurrent readers, so durability/reader-friendly
         # WAL is unnecessary here. WAL is restored in the finally block before close so that
-        # Morning View / Oracle continue to see the query DB in WAL mode.
+        # Morning View continues to see the query DB in WAL mode.
         target_conn.execute('PRAGMA journal_mode=DELETE')
         target_conn.execute('PRAGMA synchronous=NORMAL')
 
@@ -1611,7 +1611,7 @@ def create_query_sync(interactive=True, retry_attempt=0, max_retries=3):
 
             # Restore WAL mode on target before closing. journal_mode is persisted in the
             # SQLite file header, so leaving it as DELETE would force every future reader
-            # (Morning View, Oracle) into DELETE mode and lose concurrent-read benefits.
+            # (Morning View) into DELETE mode and lose concurrent-read benefits.
             # synchronous is per-connection only — no restore needed.
             try:
                 target_conn.execute('PRAGMA journal_mode=WAL')
@@ -1658,7 +1658,7 @@ def create_query_sync(interactive=True, retry_attempt=0, max_retries=3):
             return 1
 
         # Drop indexes that only serve production (collector/analyzer/alerts/archive).
-        # Query DB consumers (Morning View, Oracle) never filter on these columns.
+        # Query DB consumers (Morning View) never filter on these columns.
         # Keeping them would force the quick-sync INSERT to maintain 5 B-trees instead of 2,
         # adding minutes of random I/O per cycle for zero read benefit.
         try:

@@ -13,7 +13,7 @@ Comprehensive multi-strategy options analysis system centered around a datalake 
 
 1. **Strategies** - Trading analysis modules (Flow Monitor, Option Pipeline, Earnings Intel)
 2. **Data Layer** - SQLite databases with sector archiving
-3. **AI Systems** - Oracle, AI Council, Morning View
+3. **AI Systems** - AI Council, Morning View
 4. **Auto-Fix** - Self-healing error detection and repair
 5. **Main Orchestrator** - Daily cycle coordination
 
@@ -142,7 +142,7 @@ Database: Archive operations (if Friday)
 **Query Database:** `data/datalake_query.db`
 - Read-only analysis
 - Synced 3x daily from primary (7:20 AM, 5:45 PM, 7:00 PM)
-- Used by: Oracle, Morning View, auto-fix, all analysis tools
+- Used by: Morning View, auto-fix, all analysis tools
 - **Default for auto-fix queries**
 
 ### Sector Archives (13 databases)
@@ -196,7 +196,7 @@ Collection → Primary DB → Strategies → Analysis → AI Systems → User In
                 ↓
            Query DB (synced 3x daily)
                 ↓
-     Oracle / Morning View / Auto-Fix
+     Morning View / Auto-Fix
 ```
 
 **Collection Sources:**
@@ -207,7 +207,7 @@ Collection → Primary DB → Strategies → Analysis → AI Systems → User In
 **Analysis Layers:**
 - Strategy-specific (Flow Monitor alerts, OI concentrations)
 - Cross-strategy (Earnings Intel + Option Pipeline IV)
-- AI-powered (Oracle queries, AI Council analysis)
+- AI-powered (AI Council analysis)
 
 ---
 

@@ -28,16 +28,13 @@
 **2. Review Watchlist**
 ```bash
 # Get full watchlist
-python oracle_bridge.py "show me today's watchlist"
-
-# Or query directly
 python tools/direct_db_query.py --sql "SELECT * FROM v_morning_watchlist LIMIT 10"
 ```
 
 **3. Deep Dive on Interesting Symbols**
 ```bash
 # Example: Analyze KDP from watchlist
-python oracle_bridge.py "show me KDP OI timing context and top strikes"
+python tools/direct_db_query.py --sql "SELECT * FROM v_oi_timing_context WHERE symbol = 'KDP'"
 ```
 
 **4. Compare Options for Trade Setup**
@@ -190,7 +187,7 @@ Morning Views creates 4 SQL views in `datalake_query.db`:
 
 ```bash
 # Step 1: Get watchlist (shows top 20, sorted by confluence)
-python oracle_bridge.py "show me today's watchlist"
+python tools/direct_db_query.py --sql "SELECT * FROM v_morning_watchlist LIMIT 20"
 
 # Step 2: Filter by signal type if desired
 python tools/direct_db_query.py --sql "
@@ -502,24 +499,6 @@ Watch for pullback to POC ($178) for re-entry opportunity.
 
 ## CLI Commands
 
-### Quick Queries with Oracle Bridge
-
-**Natural language queries (uses Claude API, costs ~$0.01-0.03):**
-
-```bash
-# Get watchlist
-python oracle_bridge.py "show me today's watchlist"
-
-# Deep dive on symbol
-python oracle_bridge.py "analyze KDP OI timing and positioning"
-
-# Find specific patterns
-python oracle_bridge.py "show me all PREDICTIVE call positions with high OI"
-
-# Earnings plays
-python oracle_bridge.py "what symbols have earnings this week?"
-```
-
 ---
 
 ### Direct SQL Queries (Fast, Free)
@@ -602,7 +581,7 @@ python tools/direct_db_query.py --sql "SELECT COUNT(*) FROM v_morning_watchlist"
 
 **Step 1: Check Watchlist**
 ```bash
-python oracle_bridge.py "show me today's watchlist"
+python tools/direct_db_query.py --sql "SELECT * FROM v_morning_watchlist LIMIT 20"
 ```
 
 **Result:** MGM appears with:

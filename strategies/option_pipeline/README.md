@@ -281,7 +281,6 @@ These systems read data produced by Option Pipeline:
 |----------|-----------|---------|
 | **Earnings Intelligence** | `option_symbol_summary` | IV metrics (front month, 30/45/60 DTE) for earnings analysis |
 | **Morning View TUI** | `option_contracts`, `option_symbol_summary` | Symbol detail display, contract-level browsing |
-| **Oracle AI** | `option_symbol_summary` | AI-powered market analysis queries |
 | **Sector Archives** | Both tables | Friday night archival to `data/sector_archive/{sector}.db` (Tier 2: 30-day MOVE) |
 | **Analysis tools** | Both tables | Volume profile, technical levels, ad-hoc queries |
 

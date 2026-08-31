@@ -143,7 +143,6 @@ Flow Monitor auto-posts qualifying alerts to X. Hooked from `fm_alerts.py` via `
 - **strategies/option_pipeline/**: Open interest analysis (±20% strike range), formerly OID
 - **strategies/earnings_intel/**: IV tracking, sector sympathy, arbitrage detection
 - **strategies/airline_play/**: Airline-specific options tracking
-- **oracle/**: AI-powered market analysis via Claude API
 - **core/**: Tradier API client, Alpha Vantage client, symbol universe (`symbols_klmn800.py`)
 - **tools/**: Utilities — `log_utils.py` (console output), `decimal_formatter.py`, `news_sentiment.py`, `symbol_lifecycle.py`, `trade_ingest.py`, `email_reader.py`
 - **data/**: SQLite databases (`datalake.db`, `performance.db`), sector archives, caching
@@ -172,7 +171,7 @@ Use `from tools.decimal_formatter import clean_database_row` before all INSERT/U
 | Database | Purpose | When to Use |
 |----------|---------|-------------|
 | `data/datalake.db` | Production writes | Collection pipelines only |
-| `data/datalake_query.db` | Read-only analysis | Claude Code queries, Oracle, reporting |
+| `data/datalake_query.db` | Read-only analysis | Claude Code queries, reporting |
 
 **Claude Code should always use `datalake_query.db`.** Only use `datalake.db` when explicitly instructed or writing to production pipelines. Sync: `python data/health/db_backup.py --sync` (requires explicit approval).
 

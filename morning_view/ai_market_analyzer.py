@@ -4,7 +4,7 @@ AI Market Analyzer - Standalone Tool
 =====================================
 
 AI-powered market intelligence using Claude API to analyze comprehensive market data.
-Implements a 4-round persistent memory analysis framework for sophisticated market insights.
+Implements a 3-round persistent memory analysis framework for sophisticated market insights.
 
 Extracted from daily_analysis system (deprecated 2025-10-13)
 Queries market_daily_summary directly (no curated tables required)
@@ -12,7 +12,6 @@ Queries market_daily_summary directly (no curated tables required)
 Architecture:
 - Round 1: Today's Market Snapshot (no time series)
 - Round 2: Time Series Analysis (5-day metrics focus)
-- Round 3: Historical Database Exploration (unlimited query access)
 - Round 4: Synthesis & Memory Formation (actionable intelligence)
 
 Usage:
@@ -34,19 +33,12 @@ import argparse
 # Add parent directory to path for core imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import Oracle bridge for Round 3 database queries
-try:
-    from tools.oracle_bridge import OracleBridge
-except ImportError:
-    print("Warning: Oracle bridge not available. Round 3 queries will be limited.")
-    OracleBridge = None
-
 import anthropic
 
 
 class MarketAnalysisEngine:
     """
-    AI-powered market analysis engine with 4-round persistent memory framework.
+    AI-powered market analysis engine with 3-round persistent memory framework.
     """
 
     def __init__(self, config, logs_directory=None):
@@ -71,15 +63,6 @@ class MarketAnalysisEngine:
 
         # Create logs directory if it doesn't exist
         os.makedirs(self.logs_directory, exist_ok=True)
-
-        # Oracle integration for Round 3
-        self.oracle = None
-        if OracleBridge:
-            try:
-                self.oracle = OracleBridge(silent=True)
-                print("INFO: Oracle database integration initialized for Round 3")
-            except Exception as e:
-                print("WARNING: Oracle initialization failed: {}. Round 3 will use limited queries.".format(str(e)))
 
         print("INFO: Market Analysis Engine initialized with model: {}".format(
             self.claude_config.get('model', 'claude-3-5-haiku-20241022')
@@ -423,119 +406,12 @@ Provide assessment using exact structure and robotic precision.""".format(
 
         return response
 
-    def execute_round_3_exploration(self, round_1_notes, round_2_notes, trade_date):
-        """Round 3: Historical Database Exploration with REAL Oracle queries only."""
-        print("INFO: Starting Round 3: Database Exploration")
+    def execute_round_4_synthesis(self, trade_date=None):
+        """Round 4: Final synthesis and structured output.
 
-        # STRICT POLICY: Only proceed if Oracle is available
-        if not self.oracle or not hasattr(self.oracle, '_initialized') or not self.oracle._initialized:
-            print("WARNING: Oracle not available - Round 3 skipped (no fake data policy)")
-            response = "ROUND 3 SKIPPED: Database access not available. No historical analysis performed."
-            insights = []
-
-            # Log the skip
-            input_data = {'oracle_status': 'not_available', 'policy': 'no_fake_data'}
-            self.save_round_details("round_3", "N/A - Oracle unavailable", response, input_data, trade_date)
-
-            return response, insights
-
-        # Use simple fallback question for Round 3
-        import random
-        oracle_friendly_questions = [
-            "Show me the last 10 records from market_daily_summary where vix_close > 20",
-            "Find records from market_daily_summary where spy_change_percent > 1.0 and vix_change_percent > 0",
-            "Show me market_daily_summary records where market_direction = 'Bull' from last 30 days"
-        ]
-
-        historical_question = random.choice(oracle_friendly_questions)
-        print("INFO: Using Oracle question: {}".format(historical_question))
-
-        # Execute the Oracle query
-        try:
-            result = self.oracle.raw_query(historical_question)
-            if not result.get('success', False):
-                print("WARNING: Oracle query failed, skipping Round 3")
-                response = "ROUND 3 SKIPPED: Oracle query unsuccessful."
-                insights = []
-                return response, insights
-
-            query_results = result.get('results', [])
-            sql_used = result.get('sql_generated', 'Unknown SQL')
-            row_count = result.get('row_count', 0)
-
-            print("INFO: Oracle query successful: {} rows returned".format(row_count))
-
-            # Historical pattern analysis framework
-            historical_framework = """
-=== HISTORICAL PATTERN INTELLIGENCE FRAMEWORK ===
-
-FREQUENCY ASSESSMENT:
-• Query results >5 rows = common pattern, 2-5 = occasional, 1 = rare, 0 = unprecedented
-
-PATTERN CLASSIFICATION:
-• Rate historical precedent: COMMON/OCCASIONAL/RARE/UNPRECEDENTED
-
-FORBIDDEN: "suggests," "tends to," "might indicate"
-REQUIRED: "[X] occurrences in [timeframe] + [outcome pattern] = [confidence level]"
-"""
-
-            # Send the REAL DATA to Claude for analysis
-            analysis_prompt = """You are a quantitative pattern recognition analyst providing historical precedent assessment.
-
-ROUND 1 BASELINE: {}
-ROUND 2 MOMENTUM: {}
-
-{}
-
-HISTORICAL QUERY: {}
-SQL EXECUTED: {}
-RESULTS ({} rows): {}
-
-=== REQUIRED ANALYSIS STRUCTURE ===
-
-1. **Pattern Frequency**: [X] occurrences = COMMON/OCCASIONAL/RARE classification
-2. **Current Context**: Today's setup vs historical precedent + confidence assessment
-
-=== OUTPUT REQUIREMENTS ===
-• Maximum 2 sentences, data-driven precision
-• Include specific occurrence counts
-• End with precedent-based directional bias (BULLISH/BEARISH/NEUTRAL)
-
-Provide assessment using exact structure and robotic precision.""".format(
-                round_1_notes,
-                round_2_notes,
-                historical_framework,
-                historical_question,
-                sql_used,
-                row_count,
-                query_results[:10] if len(query_results) > 10 else query_results
-            )
-
-            # Get Claude's analysis of the real data
-            response = self.call_claude_api(analysis_prompt, "Round_3_Analysis", max_tokens=400)
-            self.round_results['round_3'] = response
-
-            # Save detailed logs with real data
-            input_data = {
-                'historical_question': historical_question,
-                'sql_generated': sql_used,
-                'oracle_results': query_results,
-                'row_count': row_count,
-                'data_source': 'real_oracle_query'
-            }
-            self.save_round_details("round_3", analysis_prompt, response, input_data, trade_date)
-
-            insights = []
-            return response, insights
-
-        except Exception as e:
-            print("ERROR: Round 3 Oracle integration failed: {}".format(str(e)))
-            response = "ROUND 3 ERROR: Database integration failure."
-            insights = []
-            return response, insights
-
-    def execute_round_4_synthesis(self, insights_discovered, trade_date=None):
-        """Round 4: Final synthesis and structured output."""
+        Kept as "round_4" in logs/keys for continuity; Round 3 (Oracle/Vanna
+        database exploration) was retired 2026-08-31.
+        """
         print("INFO: Starting Round 4: Synthesis & Memory Formation")
 
         # Final synthesis framework for robotic intelligence output
@@ -559,7 +435,6 @@ REQUIRED: Specific ratings + numerical confidence levels
 
 ROUND 1 MARKET TYPE: {}
 ROUND 2 MOMENTUM DATA: {}
-ROUND 3 HISTORICAL PRECEDENT: {}
 
 {}
 
@@ -587,7 +462,6 @@ ROBOTIC PRECISION REQUIRED - no market commentary, only trading intelligence.
 Respond ONLY with valid JSON object matching the example structure. No nested objects. No additional text.""".format(
             self.round_results.get('round_1', 'No Round 1 data'),
             self.round_results.get('round_2', 'No Round 2 data'),
-            self.round_results.get('round_3', 'No Round 3 data'),
             synthesis_framework
         )
 
@@ -597,7 +471,6 @@ Respond ONLY with valid JSON object matching the example structure. No nested ob
         input_data = {
             'round_1_results': self.round_results.get('round_1'),
             'round_2_results': self.round_results.get('round_2'),
-            'round_3_results': self.round_results.get('round_3'),
         }
         self.save_round_details("round_4", prompt, response, input_data, trade_date)
 
@@ -610,7 +483,7 @@ Respond ONLY with valid JSON object matching the example structure. No nested ob
 
             # Add metadata
             synthesis_json["analysis_timestamp"] = datetime.now().isoformat()
-            synthesis_json["rounds_completed"] = 4
+            synthesis_json["rounds_completed"] = 3
             synthesis_json["total_tokens_used"] = self.session_tokens
             synthesis_json["total_cost_estimate"] = round(self.session_cost, 4)
             synthesis_json["model_used"] = self.claude_config.get('model', 'claude-3-5-haiku-20241022')
@@ -635,8 +508,8 @@ Respond ONLY with valid JSON object matching the example structure. No nested ob
         }
 
     def conduct_full_analysis(self, conn, trade_date):
-        """Execute the complete 4-round market analysis."""
-        print("INFO: Starting 4-round market analysis for {}".format(trade_date))
+        """Execute the complete 3-round market analysis."""
+        print("INFO: Starting 3-round market analysis for {}".format(trade_date))
 
         try:
             # Get today's market data
@@ -655,16 +528,8 @@ Respond ONLY with valid JSON object matching the example structure. No nested ob
             if not round_2_result:
                 print("WARNING: Round 2 failed, continuing with available data")
 
-            # Round 3: Historical exploration
-            round_3_result, insights = self.execute_round_3_exploration(
-                round_1_result, round_2_result or "Round 2 data unavailable", trade_date
-            )
-            if not round_3_result:
-                print("WARNING: Round 3 failed, continuing with available data")
-                insights = []
-
             # Round 4: Synthesis
-            final_synthesis = self.execute_round_4_synthesis(insights, trade_date)
+            final_synthesis = self.execute_round_4_synthesis(trade_date)
 
             # Final save of all logs
             self.save_logs_to_file(trade_date)
@@ -686,7 +551,7 @@ def main():
     sys.stdout.reconfigure(encoding='utf-8')
 
     parser = argparse.ArgumentParser(
-        description="AI Market Analyzer - 4-Round Analysis Framework",
+        description="AI Market Analyzer - 3-Round Analysis Framework",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

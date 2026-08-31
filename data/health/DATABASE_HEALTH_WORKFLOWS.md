@@ -128,7 +128,7 @@ flowchart TD
 - **datalake_query.db**: Read-only analysis database
   - Synced 3x daily from datalake.db
   - Safe to query anytime (no locking conflicts)
-  - Used by: Oracle, Claude Code, analysis tools, Morning Views
+  - Used by: Claude Code, analysis tools, Morning Views
 
 ### Backup Files
 - **datalake_backup.db**: Daily backup (overwrites previous day)

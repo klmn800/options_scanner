@@ -22,7 +22,6 @@ These modules are imported by strategies, pipelines, and the main orchestrator d
 | `email_notifier.py` | SMTP email sending using config.json credentials | Flow Monitor watchlist alerts |
 | `social_content_generator.py` | Generates enriched social posts from flow alerts | social_poster.py |
 | `social_poster.py` | Posts to Reddit/Twitter with dedup and engagement tracking | Flow Monitor social notifier |
-| `oracle_bridge.py` | Programmatic Q&A interface to Oracle AI system | Morning View AI analyzer |
 
 ### What's Normal
 
