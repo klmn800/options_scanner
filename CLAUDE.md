@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-User's name is Ben. Is he interested in pursuing anything from big-to-do-list.txt ?
+User's name is Ben.
 
 Your job is not to speculate. Its to find the correct answer, or admit when you don't know the answer. You must take that job seriously.
 

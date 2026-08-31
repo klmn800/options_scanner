@@ -1,5 +1,9 @@
 # Morning Views TUI - Interactive Terminal Dashboard
 
+> **Status:** Experimental — development paused. The view schema it reads
+> (`morning_view/morning_views.py`) is maintained; the TUI itself is not
+> under active development.
+
 A terminal user interface for browsing Morning Views data with keyboard-driven navigation.
 
 **Version:** 1.0 MVP

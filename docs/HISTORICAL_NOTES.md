@@ -4,6 +4,16 @@ Change logs documenting significant architectural decisions and migrations. Refe
 
 ---
 
+## Public Release Curation (2026-08-31)
+
+**What happened:** The repo was prepared for public release as a read-only showcase. Retired three dormant subsystems in one pass — Oracle (Vanna AI text-to-SQL round in the Morning View analyzer), the Airline Play strategy (orchestrator Step 3.3 + its two datalake tables), and the AI Council (multi-provider consensus screens, per System Analyst proposal 035) — plus the emailed morning watchlist (Step 1.6) and a set of dead tools. Roughly 59K lines removed across nine commits.
+
+**Also in this pass:** agent workspaces de-registered as submodules (each is a separate private repo; the sanitized framework skeleton is published as [agent_lab](https://github.com/klmn800/agent_lab)); working notes parked out of the repo; hardcoded credentials and personal identifiers scrubbed from the working tree and from all git history (`git filter-repo`, all commits preserved); branch renamed `master` → `main`.
+
+**Why:** The system is a personal single-machine research platform. Publishing it is about showing the work — architecture, data model, operational history — not shipping an installable product.
+
+---
+
 ## SSD Migration (2026-04-10)
 
 **What happened:** The scanner's primary drive (E:) was migrated from a Seagate Barracuda ST2000DM008 2TB HDD (7200 RPM mechanical) to a Crucial BX500 2TB SATA SSD around noon 2026-04-10. All databases (`data/datalake.db`, `data/datalake_query.db`, `data/performance.db`, all `data/sector_archive/*.db`), logs, backups, and project files now live on flash storage. The old HDD is temporarily connected via USB adapter for data transfer.

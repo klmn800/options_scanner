@@ -1,0 +1,251 @@
+{
+    "tradier": {
+        "api_key": "YOUR_API_KEY",
+        "account_id": "YOUR_ACCOUNT_ID",
+        "base_url": "https://api.tradier.com"
+    },
+    "api": {
+        "key": "YOUR_KEY",
+        "base_url": "http://localhost:5000"
+    },
+    "notifications": {
+        "email": "you@example.com",
+        "sms_enabled": false,
+        "digest_mode": true
+    },
+    "email_reports": {
+        "enabled": true,
+        "smtp_server": "smtp.gmail.com",
+        "smtp_port": 587,
+        "username": "YOUR_USERNAME",
+        "password": "YOUR_PASSWORD",
+        "default_recipient": "you@example.com"
+    },
+    "gmail_api": {
+        "client_secret_file": "client_secret_923797423221-jt0utor5k9mg3jjrc8m2jtkcbb65oqmb.apps.googleusercontent.com.json",
+        "token_file": "gmail_token.json",
+        "account": "you@example.com"
+    },
+    "open_interest_delta": {
+        "enabled": true,
+        "schedule_time": "6:35",
+        "timeout_minutes": 360,
+        "universe_size": 5681,
+        "collection_params": {
+            "max_dte": 60,
+            "min_dte": 0,
+            "strike_range_percent": 20,
+            "batch_size": 100,
+            "rate_limit_per_minute": 120
+        },
+        "storage": {
+            "retention_days": 365,
+            "compression_after_days": 30
+        }
+    },
+    "flow_monitor": {
+        "scan_interval_minutes": 12,
+        "min_significance_score": 3.5,
+        "symbols_universe": "KLMN800",
+        "collection_depth": "flow_optimized",
+        "min_dte": 7,
+        "max_dte": 75,
+        "alert_deduplication_hours": 4,
+        "alert_channels": {
+            "console": true,
+            "email": "you@example.com"
+        },
+        "evaluation": {
+            "tracking_window_days": 30,
+            "evaluation_frequency_hours": 24,
+            "data_staleness_hours": 4,
+            "quality_score_weights": {
+                "direction_weight": 0.3,
+                "magnitude_weight": 0.4,
+                "timing_weight": 0.3
+            }
+        },
+        "collection_filters": {
+            "max_distance_from_underlying": 0.1,
+            "min_oi_for_distant_strikes": 50,
+            "filter_description": "Remove zero-volume contracts >10% from underlying with <50 OI"
+        },
+        "dip_detection": {
+            "use_zscore_detection": true,
+            "zscore_min": -0.1,
+            "zscore_max": -0.2,
+            "fallback_min_pct": -1.5,
+            "fallback_max_pct": -3.5,
+            "rv_cap": 0.12,
+            "min_rv_for_zscore": 0.05,
+            "require_building_sentiment": true,
+            "email_alerts": false
+        }
+    },
+    "fmp": {
+        "api_key": "YOUR_API_KEY"
+    },
+    "finnhub": {
+        "api_key": "YOUR_API_KEY",
+        "base_url": "https://finnhub.io/api/v1",
+        "rate_limit_per_minute": 60
+    },
+    "alpha_vantage": {
+        "api_key": "YOUR_API_KEY",
+        "base_url": "https://www.alphavantage.co/query",
+        "rate_limit_per_minute": 5,
+        "rate_limit_per_day": 25,
+        "format": "csv"
+    },
+    "claude_api": {
+        "api_key": "YOUR_API_KEY",
+        "model": "claude-3-5-haiku-20241022",
+        "available_models": {
+            "haiku": "claude-3-5-haiku-20241022",
+            "sonnet": "claude-sonnet-4-5",
+            "opus": "claude-3-opus-20240229"
+        },
+        "pricing": {
+            "claude-3-5-haiku-20241022": {
+                "input": 1.0,
+                "output": 5.0
+            },
+            "claude-sonnet-4-5": {
+                "input": 3.0,
+                "output": 15.0
+            },
+            "claude-3-opus-20240229": {
+                "input": 15.0,
+                "output": 75.0
+            }
+        },
+        "max_tokens": 4000
+    },
+    "options_scanner": {
+        "strategies": {
+            "flow_monitor": {
+                "enabled": true,
+                "schedule": [
+                    "pre_market",
+                    "market_hours",
+                    "post_market"
+                ]
+            },
+            "oi_delta": {
+                "enabled": true,
+                "schedule": [
+                    "evening"
+                ]
+            },
+            "sector_rotation": {
+                "enabled": false,
+                "schedule": [
+                    "post_market"
+                ]
+            }
+        }
+    },
+    "daily_analysis": {
+        "symbol_filters": {
+            "enabled": true,
+            "criteria": {
+                "min_alert_count": 1,
+                "min_avg_significance": 4.0,
+                "underlying_price_range": {
+                    "min": 0.0,
+                    "max": 150.0
+                }
+            },
+            "priority_overrides": {
+                "always_include_if_significance_above": 5.0,
+                "never_include_symbols": [
+                    "SPY",
+                    "QQQ",
+                    "IWM"
+                ]
+            }
+        }
+    },
+    "earnings_play": {
+        "move_difference_threshold": -2.0,
+        "min_open_interest": 4000,
+        "alert_underpricing_threshold": 15.0,
+        "signal_thresholds": {
+            "watch": 15.0,
+            "buy": 30.0,
+            "strong_buy": 50.0
+        }
+    },
+    "tradeable_filter": {
+        "max_underlying_price": 60.0,
+        "min_open_interest": 500,
+        "description": "Universal filter for tradeable symbols/contracts across TUI"
+    },
+    "news_collector": {
+        "quota_allocation": {
+            "tier1": 25,
+            "tier2": 75,
+            "tier3": 25
+        },
+        "collection": {
+            "lookback_days": 14,
+            "max_article_age_days": 30,
+            "max_calls_per_key": 25,
+            "cache_ttl_hours": 24
+        }
+    },
+    "agents": {
+        "_comment": "Master on/off for agents auto-launched by main.py. Task Scheduler sessions (weekday/Saturday/Sunday) are separate and not gated here. See tools/agent_toggle.py.",
+        "earnings_researcher": {
+            "enabled": true
+        },
+        "trading_advisor": {
+            "enabled": false
+        }
+    },
+    "social_posting": {
+        "enabled": false,
+        "auto_post": false,
+        "platforms": {
+            "reddit": {
+                "enabled": false,
+                "subreddits": [
+                    "options"
+                ],
+                "post_as": "text"
+            },
+            "twitter": {
+                "enabled": false,
+                "thread_mode": true
+            }
+        },
+        "selection_criteria": {
+            "min_significance_score": 7.0,
+            "min_premium_value": 5000000,
+            "max_posts_per_day": 3,
+            "exclude_earnings_day": true
+        },
+        "timing": {
+            "delay_minutes": 30,
+            "max_age_minutes": 60
+        }
+    },
+    "reddit_api": {
+        "client_id": "YOUR_CLIENT_ID",
+        "client_secret": "YOUR_CLIENT_SECRET",
+        "username": "YOUR_USERNAME",
+        "password": "YOUR_PASSWORD",
+        "user_agent": "OptionsFlowBot/1.0"
+    },
+    "twitter_api": {
+        "api_key": "YOUR_API_KEY",
+        "api_secret": "YOUR_API_SECRET",
+        "access_token": "YOUR_ACCESS_TOKEN",
+        "access_token_secret": "YOUR_ACCESS_TOKEN_SECRET"
+    },
+    "trade_ingest": {
+        "forward_senders": [
+            "forwarder@example.com"
+        ]
+    }
+}

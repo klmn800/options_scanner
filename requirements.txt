@@ -1,0 +1,17 @@
+# Dependencies for options_scanner, pinned to the versions in production use.
+# NOTE: this repo is published as a read-only showcase of a single-machine
+# personal system — it is not a turnkey install (see README.md).
+anthropic==0.54.0
+google-api-python-client==2.176.0
+google-auth==2.40.3
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.2
+pandas==2.3.0
+praw==7.8.1
+psutil==7.0.0
+PyAutoGUI==0.9.54
+pytz==2025.2
+requests==2.32.4
+textual==6.2.1
+tweepy==4.16.0
+yfinance==0.2.64

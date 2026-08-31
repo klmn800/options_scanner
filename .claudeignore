@@ -3,10 +3,6 @@ cache/
 python/
 __pycache__/
 .claude/
-chrome_extension/
-chrome_extension2/
-Deprecated/
-options_scanner.egg-info/
 
 # Large files
 *.log
@@ -15,7 +11,3 @@ options_scanner.egg-info/
 *.tmp
 *.temp
 nul
-
-# Exclude deprecated subdirectories everywhere
-*/Deprecated/
-**/Deprecated/
