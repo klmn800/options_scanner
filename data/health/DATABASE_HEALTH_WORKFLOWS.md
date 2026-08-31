@@ -27,7 +27,7 @@ flowchart TD
     Sync2 --> SyncOp2[Copy datalake.db<br/>→ datalake_query.db]
     SyncOp2 --> Sync2Done[~14 minutes<br/>Complete OI + Volume]
 
-    Sync2Done --> EarningsPhase[Earnings Intel<br/>Airline Play]
+    Sync2Done --> EarningsPhase[Earnings Intel]
     EarningsPhase --> Sync3[Query DB Sync #3 Final<br/>db_backup.py --sync --auto]
 
     Sync3 --> SyncOp3[Copy datalake.db<br/>→ datalake_query.db]
@@ -153,7 +153,7 @@ flowchart TD
 **Schedule:**
 - **Sync #1**: ~8:00 AM (after morning OID)
 - **Sync #2**: ~5:30 PM (after evening OID)
-- **Sync #3**: ~6:15 PM (after earnings/airline, final complete dataset)
+- **Sync #3**: ~6:15 PM (after earnings, final complete dataset)
 
 **Process:**
 ```bash

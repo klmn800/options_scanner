@@ -162,7 +162,6 @@ class OrchestratorUIMixin:
             row("Phase 3: Post-Market (~5:00 PM)")
             row("  3.1  Trade Ingest")
             row("  3.2  Evening Option Pipeline Refresh")
-            row("  3.3  Airline Play Tracking (7 symbols)")
             row("  3.4  Query Database Sync (Final)")
             blank()
             row("Phase 4: Evening Operations")

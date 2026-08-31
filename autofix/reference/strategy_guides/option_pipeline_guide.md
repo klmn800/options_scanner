@@ -231,7 +231,6 @@ if contracts_collected == 0 and api_calls_succeeded:
 
 **As of October 16, 2025:** `option_symbol_summary` is the primary IV source for:
 - Earnings Intel strategy (IV tracking)
-- Airline Play strategy
 - Morning View TUI
 - Any analysis needing symbol-level IV
 

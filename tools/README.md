@@ -16,7 +16,7 @@ These modules are imported by strategies, pipelines, and the main orchestrator d
 | `timezone_utils.py` | `now_eastern()` and date/time formatting for Eastern time | Everything (60+ imports) |
 | `decimal_formatter.py` | Enforces decimal precision (2-4 places) on all DB writes | All storage modules, strategies |
 | `autofix.py` | Error queuing, auto-fix spawning, collection health checks | main.py, all strategies, data health |
-| `base_health_reporter.py` | Base class for strategy health report generation | Flow Monitor, Option Pipeline, Earnings Intel, Airline Play |
+| `base_health_reporter.py` | Base class for strategy health report generation | Flow Monitor, Option Pipeline, Earnings Intel |
 | `realized_volatility.py` | Annualized RV using log returns (rv_5d, rv_10d, rv_20d) | Option Pipeline symbol rollup |
 | `news_sentiment.py` | Alpha Vantage news fetch + relevance-weighted sentiment scoring | Flow Monitor (enriches watchlist entries on creation) |
 | `email_notifier.py` | SMTP email sending using config.json credentials | Flow Monitor watchlist alerts |

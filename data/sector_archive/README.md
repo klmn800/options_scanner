@@ -133,13 +133,6 @@ Every archive contains **13-15 tables** with schemas identical to production `da
 12. **news_articles** - Article text and metadata
 13. **alert_contract_tracking** - Alert profitability tracking data
 
-### Airlines-Only Tables
-
-14. **airline_options_tracking** - Airline-specific contract tracking (historical, from deprecated Airline Play strategy)
-15. **airline_symbol_tracking** - Airline-specific symbol summaries (historical)
-
----
-
 ## Schema Reference
 
 All archives use modern naming conventions matching production:

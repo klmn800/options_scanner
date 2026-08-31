@@ -56,7 +56,6 @@ python main.py --simulate-time 06:35  # Pretend it's 6:35 AM (auto-expires 4h)
 python strategies/flow_monitor/fm_main.py --pre-market --no-interaction
 python strategies/option_pipeline/op_main.py --no-interaction
 python strategies/earnings_intel/ei_main.py --daily-pipeline --no-interaction
-python strategies/airline_play/ap_symbol_tracking.py --no-interaction
 
 # Trade Ingest
 python tools/trade_ingest.py                # Ingest Robinhood emails
@@ -142,7 +141,6 @@ Flow Monitor auto-posts qualifying alerts to X. Hooked from `fm_alerts.py` via `
 - **strategies/flow_monitor/**: Real-time options flow monitoring (±20% strike range), inline news sentiment, intraday earnings signal tracking
 - **strategies/option_pipeline/**: Open interest analysis (±20% strike range), formerly OID
 - **strategies/earnings_intel/**: IV tracking, sector sympathy, arbitrage detection
-- **strategies/airline_play/**: Airline-specific options tracking
 - **core/**: Tradier API client, Alpha Vantage client, symbol universe (`symbols_klmn800.py`)
 - **tools/**: Utilities — `log_utils.py` (console output), `decimal_formatter.py`, `news_sentiment.py`, `symbol_lifecycle.py`, `trade_ingest.py`, `email_reader.py`
 - **data/**: SQLite databases (`datalake.db`, `performance.db`), sector archives, caching
@@ -230,7 +228,7 @@ Use `from tools.decimal_formatter import clean_database_row` before all INSERT/U
 ### Daily Schedule
 - **Phase 1** (6:35 AM): Pre-market — OP, EI, Metadata, Trade Ingest, Sync, Views
 - **Phase 2** (9:15 AM): Flow Monitor — pre-market, market hours (~15-20 cycles), post-market
-- **Phase 3** (5:00 PM): Evening — Trade Ingest, OP, Airline Play, Final Sync
+- **Phase 3** (5:00 PM): Evening — Trade Ingest, OP, Final Sync
 - **Phase 4**: Daily Backup, Autofix Review
 - **Phase 5** (Fridays): Weekly Backup, FM Baseline, Earnings Refresh, Sector Archive
 - **Phase 6**: Performance Data (writes `performance.db`), Symbol Health Check
@@ -241,7 +239,7 @@ Single daily cycle, launched by Task Scheduler every weekday. Holiday detection 
 
 ### Key Architectural Facts
 - Symbol universe: ~820 active symbols in `core/symbols_klmn800.py`. Use `symbol_lifecycle.py` to add/remove.
-- Orchestrator order: 1.1 OP → 1.2 EI → 1.3 Meta → 1.4 TradeIngest → 1.5 Sync → 1.6 Views → 2. FM → 3.1 TradeIngest → 3.2 OP → 3.3 AP → 3.4 Sync → 4.1 Backup → 4.2 Autofix → 5.x Friday → 6.1 Perf
+- Orchestrator order: 1.1 OP → 1.2 EI → 1.3 Meta → 1.4 TradeIngest → 1.5 Sync → 1.6 Views → 2. FM → 3.1 TradeIngest → 3.2 OP → 3.4 Sync → 4.1 Backup → 4.2 Autofix → 5.x Friday → 6.1 Perf
 - `run_*()` in `main_runners.py` return structured dicts (`{'success': bool, ...}`), not bools
 
 ---

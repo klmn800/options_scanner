@@ -63,4 +63,3 @@ Three approaches to trading around earnings events. All are subject to refinemen
 
 - **EARNINGS_STRADDLE_PLAYBOOK.md** — Detailed execution guide for Strategy 2, including the TOST case study
 - **Earnings Scenario Calculator** (`tools/earnings_scenario.py`) — Models post-earnings P/L with IV crush for any of these strategies
-- **Airline Play** (`strategies/airline_play/`) — Data infrastructure that supports Strategy 3 for airlines

@@ -4,14 +4,12 @@
 **Last Updated:** January 8, 2026 (Current Database State)
 **Database:** datalake.db
 **Total Tables:** 28 (25 active documented tables)
-**Total Rows:** 24,900,000+ (including 23.5M flow scans, 1.34M option contracts, 40.7K airline contracts, 19.9K option summaries, 1,757 flow alerts, 454 earnings events, 9.3K earnings moves)
+**Total Rows:** 24,900,000+ (including 23.5M flow scans, 1.34M option contracts, 19.9K option summaries, 1,757 flow alerts, 454 earnings events, 9.3K earnings moves)
 
 ## Table Summary
 
 | Table Name | Row Count | Status |
 |------------|-----------|---------|
-| airline_options_tracking | 40,780 | ✅ Active |
-| airline_symbol_tracking | 607 | ✅ Active |
 | alert_contract_tracking | 1,283 | ✅ Active |
 | earnings_events | 454 | ✅ Active |
 | earnings_moves | 9,296 | ✅ Active |
@@ -998,159 +996,6 @@
 2. **Leader Identification:** Marks industry leaders whose earnings move peers
 3. **Weighted Relationships:** Weight factors for correlation strength
 4. **Active Management:** Can disable/enable mappings without deletion
-
-### airline_options_tracking
-**Rows:** 40,780
-**Purpose:** Specialized airline industry options tracking (Airline Play Strategy)
-**Populated By:** Airline-specific tracking pipeline
-**Coverage:** 5 major airline symbols
-
-| Column | Type | Description |
-|--------|------|-------------|
-| contract_hash | TEXT | Contract identifier (Primary Key): SYMBOL\|STRIKE\|EXPIRATION\|TYPE |
-| trade_date | DATE | Trading date (Primary Key) |
-| symbol | TEXT | Ticker symbol |
-| strike | REAL | Strike price |
-| expiration_date | DATE | Option expiration date |
-| option_type | TEXT | CALL or PUT |
-| underlying_price | REAL | Stock price |
-| dte | INTEGER | Days to expiration |
-| moneyness | TEXT | ITM/ATM/OTM classification |
-| last_price | REAL | Last traded option price |
-| volume | INTEGER | Trading volume |
-| volume_avg_5d | REAL | 5-day average volume |
-| volume_avg_20d | REAL | 20-day average volume |
-| volume_ratio_5d | REAL | Volume vs 5-day average |
-| volume_ratio_20d | REAL | Volume vs 20-day average |
-| volume_percentile_rank_20d | REAL | 20-day volume percentile |
-| volume_change_1d | INTEGER | 1-day volume change |
-| volume_change_5d | INTEGER | 5-day volume change |
-| volume_ratio_5d_change_1d | REAL | 1-day change in 5-day volume ratio |
-| open_interest | INTEGER | Open interest |
-| oi_change_1d | INTEGER | 1-day OI change |
-| oi_change_5d | INTEGER | 5-day OI change |
-| oi_change_10d | INTEGER | 10-day OI change |
-| oi_change_pct_1d | REAL | 1-day OI change percentage |
-| oi_change_pct_5d | REAL | 5-day OI change percentage |
-| oi_change_pct_10d | REAL | 10-day OI change percentage |
-| oi_momentum_5d | REAL | 5-day OI momentum |
-| delta | REAL | Delta Greek |
-| delta_change_1d | REAL | 1-day delta change |
-| delta_change_5d | REAL | 5-day delta change |
-| delta_momentum | REAL | Delta momentum |
-| delta_acceleration | REAL | Delta acceleration |
-| gamma | REAL | Gamma Greek |
-| gamma_change_1d | REAL | 1-day gamma change |
-| gamma_change_5d | REAL | 5-day gamma change |
-| gamma_momentum | REAL | Gamma momentum |
-| theta | REAL | Theta Greek |
-| theta_change_1d | REAL | 1-day theta change |
-| theta_change_5d | REAL | 5-day theta change |
-| theta_momentum | REAL | Theta momentum |
-| theta_avg_5d | REAL | 5-day average theta |
-| theta_daily_change_avg_5d | REAL | 5-day average daily theta change |
-| vega | REAL | Vega Greek |
-| vega_change_1d | REAL | 1-day vega change |
-| vega_change_5d | REAL | 5-day vega change |
-| iv | REAL | Implied volatility |
-| iv_change_1d | REAL | 1-day IV change |
-| iv_change_5d | REAL | 5-day IV change |
-| iv_change_20d | REAL | 20-day IV change |
-| iv_change_pct_1d | REAL | 1-day IV change percentage |
-| iv_change_pct_5d | REAL | 5-day IV change percentage |
-| iv_change_pct_20d | REAL | 20-day IV change percentage |
-| iv_avg_5d | REAL | 5-day average IV |
-| iv_avg_20d | REAL | 20-day average IV |
-| iv_percentile_20day | REAL | 20-day IV percentile |
-| iv_percentile_rank_20d | REAL | 20-day IV percentile rank |
-| iv_momentum_1d | REAL | 1-day IV momentum |
-| iv_momentum_5d | REAL | 5-day IV momentum |
-| days_to_earnings | INTEGER | Days until next earnings |
-| symbol_exp_type_hash | TEXT | Combined hash for deduplication |
-| created_at | TEXT | Record creation timestamp |
-| last_updated_timestamp | TEXT | Last update timestamp |
-
-**Primary Key:** (contract_hash, trade_date)
-
-**Key Features:**
-1. **Industry-Specific:** Focused tracking for airline sector
-2. **Full Time Series:** Complete Greek and IV tracking with multiple lookback periods
-3. **Earnings Integration:** Days-to-earnings tracking for airline reports
-
-### airline_symbol_tracking
-**Rows:** 607
-**Purpose:** Daily airline symbol-level aggregations
-**Populated By:** Airline-specific rollup pipeline
-
-| Column | Type | Description |
-|--------|------|-------------|
-| symbol | TEXT | Ticker symbol (Primary Key) |
-| trade_date | DATE | Trading date (Primary Key) |
-| close_price | REAL | Closing price |
-| high_price | REAL | High price |
-| low_price | REAL | Low price |
-| price_change_percent | REAL | Daily price change percentage |
-| volume | REAL | Trading volume |
-| total_open_interest | INTEGER | Total OI across all contracts |
-| total_call_oi | INTEGER | Total call OI |
-| total_put_oi | INTEGER | Total put OI |
-| put_call_ratio | REAL | Put/Call OI ratio |
-| oi_balance_text | TEXT | Display text for OI balance |
-| oi_0_7_days | REAL | OI expiring 0-7 days |
-| oi_8_21_days | REAL | OI expiring 8-21 days |
-| oi_22_35_days | REAL | OI expiring 22-35 days |
-| oi_36_60_days | REAL | OI expiring 36-60 days |
-| oi_0_7_days_percent | REAL | Percentage of OI expiring 0-7 days |
-| oi_8_21_days_percent | REAL | Percentage of OI expiring 8-21 days |
-| oi_22_35_days_percent | REAL | Percentage of OI expiring 22-35 days |
-| oi_36_60_days_percent | REAL | Percentage of OI expiring 36-60 days |
-| call_oi_0_7_days | REAL | Call OI expiring 0-7 days |
-| call_oi_8_21_days | REAL | Call OI expiring 8-21 days |
-| call_oi_22_35_days | REAL | Call OI expiring 22-35 days |
-| call_oi_36_60_days | REAL | Call OI expiring 36-60 days |
-| call_oi_0_7_days_percent | REAL | Percentage of call OI expiring 0-7 days |
-| call_oi_8_21_days_percent | REAL | Percentage of call OI expiring 8-21 days |
-| call_oi_22_35_days_percent | REAL | Percentage of call OI expiring 22-35 days |
-| call_oi_36_60_days_percent | REAL | Percentage of call OI expiring 36-60 days |
-| put_oi_0_7_days | REAL | Put OI expiring 0-7 days |
-| put_oi_8_21_days | REAL | Put OI expiring 8-21 days |
-| put_oi_22_35_days | REAL | Put OI expiring 22-35 days |
-| put_oi_36_60_days | REAL | Put OI expiring 36-60 days |
-| put_oi_0_7_days_percent | REAL | Percentage of put OI expiring 0-7 days |
-| put_oi_8_21_days_percent | REAL | Percentage of put OI expiring 8-21 days |
-| put_oi_22_35_days_percent | REAL | Percentage of put OI expiring 22-35 days |
-| put_oi_36_60_days_percent | REAL | Percentage of put OI expiring 36-60 days |
-| iv_front_month | REAL | Front month IV (7-21 DTE) |
-| iv_30dte | REAL | 30 DTE IV (22-35 DTE) |
-| iv_45dte | REAL | 45 DTE IV (36-50 DTE) |
-| iv_60dte | REAL | 60 DTE IV (51-70 DTE) |
-| iv_percentile_front_month | REAL | Front month IV percentile |
-| iv_percentile_30dte | REAL | 30 DTE IV percentile |
-| iv_percentile_45dte | REAL | 45 DTE IV percentile |
-| iv_percentile_60dte | REAL | 60 DTE IV percentile |
-| iv_percentile_30d | REAL | 30-day IV percentile |
-| earnings_date | DATE | Next earnings date |
-| earnings_days_ahead | INTEGER | Days until earnings |
-| news_sentiment_score_avg | REAL | Average news sentiment score |
-| news_sentiment | TEXT | News sentiment label |
-| news_article_count | INTEGER | Number of news articles |
-| active_alerts_count | INTEGER | Active flow alerts count |
-| days_since_most_recent_alert | INTEGER | Days since last alert |
-| analysis_timestamp | TEXT | When analysis was performed |
-| last_updated_timestamp | TEXT | Last update timestamp |
-
-**Primary Key:** (symbol, trade_date)
-
-**Indexes:**
-- `idx_airline_symbol_latest` - Latest data lookup
-- `idx_airline_symbol_trade_date` - Time series queries
-
-**Key Features:**
-1. **Comprehensive IV Coverage:** IV across all DTE buckets with percentiles
-2. **OI Time Distribution:** OI bucketed by expiration timeframes
-3. **News Integration:** Sentiment scores and article counts
-4. **Earnings Awareness:** Days-to-earnings tracking
-5. **Flow Alert Integration:** Active alert counts and recency
 
 ### alert_contract_tracking
 **Rows:** 1,283

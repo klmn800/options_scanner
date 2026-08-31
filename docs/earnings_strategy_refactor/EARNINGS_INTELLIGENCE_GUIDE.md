@@ -24,7 +24,6 @@ Phase 1 — Pre-Market (6:35 AM ET)
 Phase 2 — Flow Monitor (9:15 AM - 5:00 PM)
 Phase 3 — Evening (5:00 PM+)
   3.1  Evening Option Pipeline
-  3.2  Airline Play
   3.3  Final Sync
 
 Phase 5 — Friday Only

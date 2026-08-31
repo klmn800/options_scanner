@@ -349,7 +349,8 @@ def ensure_schema(db_path=None):
             )
         """)
 
-        # Table 12: airline_play_performance
+        # Table 12: airline_play_performance (strategy retired 2026-08-31;
+        # table kept for historical rows, no writer remains)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS airline_play_performance (
                 trade_date          TEXT NOT NULL PRIMARY KEY,
@@ -1169,24 +1170,6 @@ def _write_subprocess_tables(cursor, trade_date, day_of_week, recorded_at,
              batch_result.get('unique_error_types') if isinstance(batch_result, dict) else None,
              batch_result.get('sessions_spawned', 0) if isinstance(batch_result, dict) else None,
              1 if (isinstance(batch_result, dict) and batch_result.get('skipped')) else 0,
-             recorded_at)
-        )
-        rows += 1
-
-    # Table 12: airline_play_performance
-    airline_result = results.get('3.3 Airline Play')
-    if airline_result is not None and airline_result != 'skipped':
-        cursor.execute(
-            "INSERT OR REPLACE INTO airline_play_performance "
-            "(trade_date, day_of_week, duration_seconds, success, "
-            "symbols_processed, symbols_failed, contracts_tracked, recorded_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (trade_date, day_of_week,
-             _r(step_durations.get('3.3 Airline Play')),
-             _result_success(airline_result),
-             airline_result.get('symbols_processed') if isinstance(airline_result, dict) else None,
-             airline_result.get('symbols_failed', 0) if isinstance(airline_result, dict) else None,
-             airline_result.get('contracts_tracked') if isinstance(airline_result, dict) else None,
              recorded_at)
         )
         rows += 1

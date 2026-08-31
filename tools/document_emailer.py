@@ -297,64 +297,6 @@ class DocumentEmailer:
         print("   Subject: {}".format(subject))
         return True
 
-def send_airline_strategy_plan():
-    """Send the airline strategy plan as a Word document"""
-    
-    # Paths
-    strategy_plan_path = Path(__file__).parent.parent / 'strategies' / 'airline_play' / 'STRATEGY_PLAN.md'
-    output_doc_path = Path(__file__).parent.parent / 'strategies' / 'airline_play' / 'docs' / 'Airline_Strategy_Plan.docx'
-    
-    if not strategy_plan_path.exists():
-        print(f"❌ Strategy plan not found: {strategy_plan_path}")
-        return False
-    
-    # Read the strategy plan
-    with open(strategy_plan_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    # Create emailer
-    emailer = DocumentEmailer()
-    
-    # Create Word document
-    print("Converting strategy plan to Word document...")
-    doc_path = emailer.create_word_document(
-        title="Airline Volatility Strategy Module Plan",
-        content=content,
-        output_path=output_doc_path
-    )
-    
-    # Send email
-    print("Preparing email...")
-    subject = "Airline Volatility Strategy - Implementation Plan"
-    body = """Hi Ben,
-
-Attached is the comprehensive implementation plan for the Airline Volatility Strategy Module.
-
-This plan is based on your validated research showing 40-94% volatility spikes in airline stocks around days 8-12 of each month.
-
-Key highlights:
-- Calendar-based pattern detection
-- Automated position management  
-- Risk controls and stop losses
-- Integration with existing systems
-
-Ready for your review and approval to begin Phase 1 implementation.
-
-Best regards,
-Claude Code"""
-    
-    success = emailer.send_document_email(
-        subject=subject,
-        body_text=body,
-        document_path=doc_path
-    )
-    
-    if success:
-        print("Word document saved: {}".format(doc_path))
-        print("Airline strategy plan sent successfully")
-    
-    return success
-
 if __name__ == '__main__':
     # Install docx if needed
     try:
@@ -365,4 +307,4 @@ if __name__ == '__main__':
         subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'python-docx'])
         from docx import Document
     
-    send_airline_strategy_plan()
+    print('No default action; import and call a send_* function directly.')

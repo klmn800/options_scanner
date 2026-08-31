@@ -460,7 +460,7 @@ End-of-day metrics written by Phase 6: System Maintenance. Use this to establish
 | `morning_views_performance` | Morning Views generation — duration, success |
 | `backup_performance` | Daily + weekly backup — size, duration, verification |
 | `batch_mode_performance` | Autofix batch review — errors found, sessions spawned |
-| `airline_play_performance` | Airline tracking — symbols, contracts tracked |
+| `airline_play_performance` | Airline tracking (strategy retired 2026-08-31; historical rows only) |
 | `sector_archive_performance` | Friday archive — tier row counts, space reclaimed |
 
 ### Diagnostic Queries

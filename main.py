@@ -17,7 +17,6 @@ Clean Architecture:
   4:30 PM  - Flow Monitor Post-Market Analysis (backfill, regime, rollup, evaluation)
            - Evening Option Pipeline (volume-enriched data)
            - Query Database Sync (volume-enriched OI)
-           - Airline Play Tracking
            - Query Database Sync (final)
            - Database Backup (datalake_backup.db - daily)
   Friday   - Sector Archive (three-tier retention: 15d/30d/90d)
@@ -172,7 +171,6 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         'Trade Ingest (Post-Market)',
         'Evening Option Pipeline',
         'Query Database Sync (Evening)',
-        'Airline Play Tracking',
         'Query Database Sync (Final)',
         'Daily Backup',
         'Autofix Review',
@@ -512,12 +510,6 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         results['3.2 Evening Option Pipeline'] = self.run_evening_option_pipeline()
         step_durations['3.2 Evening Option Pipeline'] = time.time() - _t0
 
-        # Step 3.3: Airline Play Tracking Phase
-        self.coffee_break(60, "Quick breather before the home stretch", after_step="Evening Option Pipeline")
-        self.beautiful_log("Step 3.3: Airline Play Tracking Phase", 'phase')
-        _t0 = time.time()
-        results['3.3 Airline Play'] = self.run_airline_play_phase()
-        step_durations['3.3 Airline Play'] = time.time() - _t0
 
         # Step 3.4: Query Database Sync (Final)
         self.beautiful_log("Step 3.4: Query Database Sync (Final)", 'phase')
@@ -678,8 +670,6 @@ Testing with Time Simulation (auto-expires after 4 hours by default):
                            help='Run sector-based database archive only')
     mode_group.add_argument('--database-backup', action='store_true',
                            help='Run database backup only')
-    mode_group.add_argument('--airline-play', action='store_true',
-                           help='Run Airline Play tracking only')
     mode_group.add_argument('--fm-baseline', action='store_true',
                            help='Run FM baseline update only')
     mode_group.add_argument('--trade-ingest', action='store_true',
@@ -764,9 +754,6 @@ def main():
         elif args.database_backup:
             orchestrator.print_banner("database-backup")
             success = orchestrator.run_database_backup()
-        elif args.airline_play:
-            orchestrator.print_banner("airline-play")
-            success = orchestrator.run_airline_play_phase()
         elif args.fm_baseline:
             orchestrator.print_banner("fm-baseline")
             result = orchestrator.run_fm_baseline_update()
