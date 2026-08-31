@@ -115,11 +115,13 @@ python tools/paper_close_engine.py                                             #
 
 ### Agent System (`agents/`)
 
-Autonomous Claude Code CLI agents. Each has its own workspace, `.git/`, write guard, and mailboxes. Pattern doc: `agents/AGENT_PATTERN.md`.
+Autonomous Claude Code CLI agents. Each workspace is a separate **private** repo, gitignored here; the sanitized framework skeleton is published at `github.com/klmn800/agent_lab`. Pattern doc: `agents/AGENT_PATTERN.md`. Overview: `agents/README.md`.
 
 - **System Analyst** — nightly data quality audits, proposals. `agents/system_analyst/`
-- **Trading Advisor** — morning briefs, interactive discussion, nightly research. `agents/trading_advisor/`
-- `agents/Deprecated/` — earlier SDK-based Flow Tracker Agent (unused)
+- **Trading Advisor** — morning briefs, interactive discussion. `agents/trading_advisor/`
+- **Market Analyst** — evening research + trade-call grading. `agents/market_analyst/`
+- **Earnings Researcher** — earnings-date dispute resolution, weekly dossiers. `agents/earnings_researcher/`
+- **Roundtable** — multi-agent moderated discussion orchestrator. `agents/roundtable/`
 
 For agent launch commands, key files, and proposal review workflow: `docs/CLAUDE_REFERENCE.md`.
 

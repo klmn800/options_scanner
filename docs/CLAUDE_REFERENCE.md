@@ -8,6 +8,12 @@ For the core operational guide (loaded every session), see the project root `CLA
 
 ## Agent System Details
 
+> **Note:** The five agent workspaces under `agents/` are separate **private** repos,
+> gitignored in this repository. The sanitized framework skeleton (launchers, hooks,
+> prompts, conventions for all five agents plus the roundtable orchestrator) is
+> published at `github.com/klmn800/agent_lab`. Overview: `agents/README.md`.
+> The sections below describe how the live local agents run on Ben's machine.
+
 ### System Analyst Agent
 
 An autonomous Claude Code session that audits data quality, investigates pipeline behavior, and proposes system improvements. Runs daily at 9 PM via Task Scheduler. Read-only — never modifies code or databases outside its own workspace. Formerly "Strategic Advisor" (renamed 2026-04-22).

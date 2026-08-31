@@ -872,6 +872,10 @@ class OrchestratorRunnersMixin:
         The advisor queries the database, builds a morning brief, and
         stays available for interactive discussion throughout the day.
 
+        Note: the Trading Advisor workspace (agents/trading_advisor/) is a
+        separate private repo, gitignored here — see agents/README.md. The
+        launch is gated by config.json agents.trading_advisor.
+
         Returns status string for the completion log.
         """
         from tools.agent_toggle import is_agent_enabled

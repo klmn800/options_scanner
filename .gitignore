@@ -78,3 +78,22 @@ morning_view/Schema_v_*.txt
 big-to-do-list.md
 hooks-agents-notes.txt
 PLAN.md
+
+# Agent workspaces (private repos — framework published at github.com/klmn800/agent_lab)
+agents/system_analyst/
+agents/trading_advisor/
+agents/market_analyst/
+agents/earnings_researcher/
+agents/roundtable/
+
+# Live local agent tooling (not part of the public showcase)
+tools/graduate_reference.py
+.claude/hooks/
+scheduled_tasks/start_system_analyst.bat
+scheduled_tasks/start_system_analyst_sunday.bat
+scheduled_tasks/start_market_analyst_research.bat
+scheduled_tasks/start_market_analyst_saturday.bat
+scheduled_tasks/start_market_analyst_sunday.bat
+scheduled_tasks/start_trading_advisor_research.bat
+scheduled_tasks/start_trading_advisor_saturday.bat
+scheduled_tasks/start_trading_advisor_sunday.bat
