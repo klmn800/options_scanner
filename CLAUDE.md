@@ -10,6 +10,20 @@ Your job is not to speculate. Its to find the correct answer, or admit when you 
 
 ---
 
+## PUBLIC REPO — How This Repo Works (since 2026-08-31)
+
+This repo is **PUBLIC** at `github.com/klmn800/options_scanner` (read-only showcase, branch `main`). Anything committed AND pushed is instantly visible to the world.
+
+- **Secrets** live only in gitignored `config.json` / `credentials.json` (public shapes: `config.json.example`, `credentials.json.example`). Git history was scrubbed with filter-repo on 2026-08-31 (Tradier key, personal emails, third-party identifiers) — never reintroduce any of them in code, docs, or commit messages. Secret scanning + push protection are enabled on GitHub.
+- **Gitignored but LIVE on disk** — do not treat as cruft, do not force-add: the five `agents/*` workspaces (each its own private `os-agent-*` repo), `.claude/hooks/` write guards, `tools/graduate_reference.py`, the 8 TA/MA/SA launcher `.bat`s in `scheduled_tasks/` (Task Scheduler targets), `docs/_local/` (parked working notes), `memory/`.
+- **The agent framework** is public separately at `github.com/klmn800/agent_lab`; the workspaces stay private. `agents/README.md` (tracked) links it.
+- **Stale SHAs:** the history rewrite changed every commit SHA — pre-2026-08-31 SHAs cited in memories/notes no longer resolve.
+- **Release plan + deferred list:** `docs/_local/PUBLIC_RELEASE_PLAN.md` (local only).
+
+**Presentation grade:** The public repo shipped functional but not fully polished. Periodically prompt Ben to continue presentation work — deferred items include README screenshots (TUI + an FM cycle summary box), a possible logo, and publishing curated agent output. Any session that touches README/docs is a natural moment to ask.
+
+---
+
 
 ## CRITICAL: DATABASE SYNC RESTRICTION
 
