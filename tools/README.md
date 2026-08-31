@@ -46,7 +46,6 @@ These are invoked on-demand by Ben or Claude Code for analysis, maintenance, and
 | Tool | Purpose | Usage |
 |------|---------|-------|
 | `direct_db_query.py` | SQL query CLI — primary tool for all database analysis | `python tools/direct_db_query.py --sql "..."` |
-| `recreate_views.py` | Rebuild Morning View database views after schema changes | `python tools/recreate_views.py` |
 
 `direct_db_query.py` defaults to `datalake_query.db` (the safe query database). Use `--db data/datalake.db` only when you explicitly need production. Key flags: `--schema TABLE`, `--tables`, `--multi "Q1; Q2"`.
 
@@ -59,12 +58,11 @@ These are invoked on-demand by Ben or Claude Code for analysis, maintenance, and
 
 `volume_profile_calculator.py` is also imported by Morning View for symbol detail display. `technical_levels.py` is standalone CLI only (not yet integrated).
 
-### Email & Knowledge
+### Email
 
 | Tool | Purpose | Usage |
 |------|---------|-------|
 | `email_reader.py` | Gmail API reader for klmn800alerts@gmail.com | `python tools/email_reader.py --check` |
-| `email_digester.py` | Spawns Claude Code (Haiku) to extract knowledge from inbox | `python tools/email_digester.py` |
 
 `email_reader.py` requires OAuth2 token (`gmail_token.json`). See CLAUDE.md for full CLI reference.
 
@@ -74,10 +72,7 @@ These are invoked on-demand by Ben or Claude Code for analysis, maintenance, and
 |------|---------|-------|
 | `launch_claude_dev.py` | Ctrl+E in Morning View TUI spawns Claude Code with context | Invoked by TUI hotkey |
 
-### Portfolio
-
-| Tool | Purpose | Usage |
-|------|---------|-------|
+------|---------|-------|
 | `add_position.py` | Standalone options position tracker with P&L management | `python tools/add_position.py --interactive` |
 
 Not currently integrated into the main system. Self-contained with its own database table.
@@ -88,7 +83,6 @@ Not currently integrated into the main system. Self-contained with its own datab
 
 | Folder | Purpose |
 |--------|---------|
-| `meta/` | Self-healing / autonomous development vision and POC. Research phase — not integrated into production. See `meta/README.md`. |
 | `Deprecated/` | Graveyard for retired scripts: old migration tools, superseded utilities, one-time jobs. Do not add new tools here — if it's not reusable, it shouldn't be in `tools/` at all. |
 
 ---

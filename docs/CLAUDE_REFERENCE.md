@@ -92,19 +92,6 @@ python tools/email_reader.py --labels
 python tools/email_reader.py --auth
 ```
 
-## Email Knowledge Digester
-
-```bash
-# Process unread emails → extract knowledge → save to memory/knowledge/
-# Spawns a Claude Code (Haiku) session in a visible window
-python tools/email_digester.py                      # Process all unread
-python tools/email_digester.py --label newsletters  # Only labeled messages
-python tools/email_digester.py --dry-run            # Preview without processing
-python tools/email_digester.py --headless           # No visible window
-```
-
----
-
 ## Database Backup & Archive Strategy
 
 System maintains **two backup files** and **sector-based archives** for redundancy and performance:
@@ -277,7 +264,6 @@ python tools/earnings_scenario.py "TOST|25|2026-04-17|CALL" --cost 1.04 --stradd
 - `tools/lifecycle/`: Package with onboarding, offboarding, routing, preflight checks, health check (Phase 6.2), audit trail, UI helpers.
 - `tools/email_reader.py`: Gmail API inbox reader for klmn800alerts@gmail.com (OAuth2, full access)
 - `tools/trade_ingest.py`: Trade execution parser — ingests Robinhood confirmation emails from Gmail into `trade_executions` table. Runs as orchestrator Steps 1.4 + 3.1. Design doc: `docs/trade_ingest/BRAINSTORM.md`.
-- `tools/email_digester.py`: Spawns Claude Code (Haiku) to extract knowledge from emails into `memory/knowledge/`
 - `strategies/flow_monitor/fm_config.py` & `strategies/option_pipeline/op_config.py`: Strategy configurations
 - `strategies/flow_monitor/fm_earnings_signals.py`: Intraday earnings signal tracker — recomputes straddle underpricing from live scan data every N cycles (~hourly), logs signal upgrades/downgrades vs morning baseline. Console only, config toggle.
 
