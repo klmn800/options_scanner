@@ -46,7 +46,7 @@ def migrate_discovery_analysis():
         CREATE TABLE discovery_analysis_new (
             trade_date TEXT PRIMARY KEY,
 
-            -- Core analysis (clean text like symbol_ai_council)
+            -- Core analysis (clean formatted prose)
             analysis_text TEXT NOT NULL,
 
             -- Metadata
@@ -98,7 +98,7 @@ def migrate_discovery_analysis():
         output_tokens = usage.get('output_tokens')
         cost_usd = usage.get('cost_usd')
 
-        # Build clean analysis_text (formatted prose like symbol_ai_council)
+        # Build clean analysis_text (formatted prose)
         recommendations = analysis_data.get('recommendations', [])
         analysis_text_parts = []
 

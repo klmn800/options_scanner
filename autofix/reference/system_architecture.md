@@ -13,7 +13,7 @@ Comprehensive multi-strategy options analysis system centered around a datalake 
 
 1. **Strategies** - Trading analysis modules (Flow Monitor, Option Pipeline, Earnings Intel)
 2. **Data Layer** - SQLite databases with sector archiving
-3. **AI Systems** - AI Council, Morning View
+3. **AI Systems** - Morning View
 4. **Auto-Fix** - Self-healing error detection and repair
 5. **Main Orchestrator** - Daily cycle coordination
 
@@ -207,7 +207,7 @@ Collection → Primary DB → Strategies → Analysis → AI Systems → User In
 **Analysis Layers:**
 - Strategy-specific (Flow Monitor alerts, OI concentrations)
 - Cross-strategy (Earnings Intel + Option Pipeline IV)
-- AI-powered (AI Council analysis)
+- AI-powered (Morning View AI analysis)
 
 ---
 

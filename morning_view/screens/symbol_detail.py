@@ -22,7 +22,6 @@ class SymbolDetailScreen(Screen):
         Binding("1", "oi_distribution", "OI Distribution"),
         Binding("2", "oi_timing", "OI Timing"),
         Binding("3", "compare", "Compare Strikes"),
-        Binding("4", "ai_analysis", "AI Analysis"),
         Binding("5", "flow_alerts", "Flow Alerts"),
         Binding("p", "add_to_planner", "Add to Planner"),
         Binding("w", "toggle_watchlist", "Watchlist"),
@@ -330,12 +329,6 @@ class SymbolDetailScreen(Screen):
         # Lazy import to avoid circular dependency
         from morning_view.screens.compare_strikes import CompareStrikesScreen
         self.app.push_screen(CompareStrikesScreen(self.symbol))
-
-    def action_ai_analysis(self) -> None:
-        """Show AI Council screen"""
-        # Lazy import to avoid circular dependency
-        from morning_view.screens.ai_council import AICouncilScreen
-        self.app.push_screen(AICouncilScreen(self.symbol))
 
     def action_flow_alerts(self) -> None:
         """Show Flow Alerts screen filtered to this symbol"""

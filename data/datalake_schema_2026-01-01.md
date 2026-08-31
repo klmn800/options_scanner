@@ -31,7 +31,7 @@
 | symbol_baselines | 754 | ✅ Active |
 | symbol_metadata | 757 | ✅ Active |
 
-**Note:** Tables excluded from this documentation: user_watchlist, symbol_ai_council, social_posts. Tables `flow_contract_trackers`, `flow_tracker_updates`, and `agent_actions` were dropped 2026-04-22 (deprecated Flow Tracker Agent system).
+**Note:** Tables excluded from this documentation: user_watchlist, social_posts. Tables `flow_contract_trackers`, `flow_tracker_updates`, and `agent_actions` were dropped 2026-04-22 (deprecated Flow Tracker Agent system).
 
 ## Migration Notes (October 2025 - January 2026)
 

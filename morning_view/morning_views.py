@@ -170,28 +170,6 @@ class MorningViews:
         ON user_watchlist(removed_date)
         ''')
 
-        # Create symbol_ai_council table for persistent AI advisor analysis history
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS symbol_ai_council (
-            symbol TEXT NOT NULL,
-            trade_date TEXT NOT NULL,
-            general_analyst TEXT,
-            detective TEXT,
-            risk_analyst TEXT,
-            catalyst_hunter TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (symbol, trade_date),
-            FOREIGN KEY (symbol) REFERENCES symbol_metadata(symbol)
-        )
-        ''')
-
-        # Create index for fast date-based queries
-        cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_council_trade_date
-        ON symbol_ai_council(trade_date DESC)
-        ''')
-
         # Drop and recreate views to ensure they're up to date
         views_to_drop = ['v_morning_discovery', 'v_symbol_oi_detail', 'v_oi_timing_context', 'v_option_comparison', 'v_live_market_snapshot']
         for view in views_to_drop:

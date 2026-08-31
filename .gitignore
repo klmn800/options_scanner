@@ -51,7 +51,6 @@ plans/
 # Agent workspaces are git submodules (tracked via .gitmodules), not ignored.
 
 # Multi-LLM council prototype (binary + experimental)
-ai_council/
 
 # Generated task lists
 tasks/
