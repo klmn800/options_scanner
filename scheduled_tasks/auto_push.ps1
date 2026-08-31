@@ -65,9 +65,9 @@ foreach ($s in $submodules) {
 Commit-IfChanged "parent"
 
 if ($DryRun) {
-    Write-Log "[dry-run] would: git push --recurse-submodules=on-demand origin master"
+    Write-Log "[dry-run] would: git push --recurse-submodules=on-demand origin main"
 } else {
-    git push --recurse-submodules=on-demand origin master *>> $log
+    git push --recurse-submodules=on-demand origin main *>> $log
     if ($LASTEXITCODE -eq 0) { Write-Log "push OK" }
     else { Write-Log "PUSH FAILED (exit $LASTEXITCODE) - see git output above" }
 }
