@@ -412,7 +412,7 @@ The `run_type` column distinguishes `'daily_pipeline'` from `'weekly_refresh'` r
 | **Snapshot wiring verification** | Deferred to ~March 11 | Verify snapshots accumulating and primary calc path fires |
 | **Signal threshold recalibration** | Pending ~100 events | Will validate WATCH/BUY/STRONG BUY against actual outcomes |
 | **Post-earnings Finnhub actuals** | Planned | `eps_actual` / `revenue_actual` → populate NULL `actual_eps` on `earnings_events` |
-| **Scenario calculator** | Proposal written | See `docs/earnings-scenario-calculator-proposal.md` |
+| **Scenario calculator** | Proposal written | See `docs/_local/earnings-scenario-calculator-proposal.md` (parked) |
 | **YFinance deprecation** | Evaluate after 2-3 weeks | If Finnhub covers all needed symbols, drop YFinance entirely |
 | **Daily Finnhub scan** | Not planned | Address only if mid-week earnings date shifts become a problem |
 | **Morning View TUI screen** | Console output covers it | Dedicated TUI screen for earnings watchlist display |

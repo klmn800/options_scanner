@@ -13,7 +13,7 @@ Three-step workflow:
 Date update rule: yfinance is the trusted source. If yfinance provides a
 valid future date that differs from the stored date, the stored date is
 updated. Conflicts are logged. Finnhub dates are used only as fallback
-for new symbols with no yfinance date. See EARNINGS_DATE_REWIRE_PLAN.md.
+for new symbols with no yfinance date. See docs/_local/earnings_strategy_refactor/EARNINGS_DATE_REWIRE_PLAN.md.
 
 Called by: main_runners.py (Phase 5, Step 5.2 -- Friday evenings)
 Reads: earnings_upcoming, config.json

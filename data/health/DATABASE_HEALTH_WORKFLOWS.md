@@ -497,7 +497,7 @@ Friday Evening:
 ---
 
 ## Related Documentation
-- **Main orchestration**: See `MAIN_DAILY_WORKFLOW.md` for daily cycle integration
+- **Main orchestration**: See `CLAUDE.md` (Daily Schedule) for daily cycle integration
 - **Autofix integration**: See `autofix/AUTOFIX_WORKFLOW.md` for error handling
 - **Sector archive design**: See `data/sector_archive/README.md`
 - **Database schema**: See `data/datalake_schema_2025-10-16.md`

@@ -4,7 +4,7 @@ Paper Trade CLI
 ===============
 Human (or agent) driver for the paper trading platform — submits orders against
 the Tradier sandbox, queries positions and balance, computes realized P&L.
-Phase 1 (State A) tool from docs/paper_trading/PHASE_1_PLAN.md.
+Phase 1 (State A) tool from docs/_local/paper_trading/PHASE_1_PLAN.md.
 
 Subcommands (mutually exclusive):
   --open               Submit an opening order (stock or option)

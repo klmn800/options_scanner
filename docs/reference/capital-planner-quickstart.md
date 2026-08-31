@@ -237,7 +237,7 @@ morning_view/
 ## Support
 
 **Documentation:**
-- Full PRD: `docs/prd-capital-planner.md`
+- Full PRD: `docs/_local/prd/prd-capital-planner.md`
 - Main README: `CLAUDE.md`
 
 **Testing:**

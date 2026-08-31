@@ -39,4 +39,4 @@ Item 6.4 in the to-do list addresses this.
 **Candidate for Level 3 evolution:** This table could be extended or replaced to become the
 Active Watch table described in the Watchlist Pipeline brainstorm. Would need: status
 tracking (watching/ready_to_buy/position_open/dismissed), source tracking, and a companion
-view for enrichment. See `docs/watchlist_pipeline/BRAINSTORM.md`.
+view for enrichment. See `docs/_local/watchlist_pipeline/BRAINSTORM.md`.

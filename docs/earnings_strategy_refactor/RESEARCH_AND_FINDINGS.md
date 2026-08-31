@@ -61,7 +61,7 @@ Concretely:
 | Document | Location | What |
 |----------|----------|------|
 | Straddle Playbook | `docs/earnings_strategy_refactor/EARNINGS_STRADDLE_PLAYBOOK.md` | The trading strategy — buy ATM straddles on underpriced earnings. Complete with TOST case study. |
-| Scenario Calculator Proposal | `docs/earnings_strategy_refactor/earnings-scenario-calculator-proposal.md` | Tool to model straddle P/L accounting for IV crush. Not yet built. |
+| Scenario Calculator Proposal | `docs/_local/earnings_strategy_refactor/earnings-scenario-calculator-proposal.md` (parked) | Tool to model straddle P/L accounting for IV crush. Not yet built. |
 | Manual Operations | `strategies/earnings_intel/docs/MANUAL_OPERATIONS.md` | SQL queries for trading journal, manual tasks. |
 | Config Thresholds | `config.json` → `earnings_play` | Signal thresholds: WATCH=15%, BUY=30%, STRONG BUY=50%. Alert: underpricing >= 15% AND OI >= 4000. |
 

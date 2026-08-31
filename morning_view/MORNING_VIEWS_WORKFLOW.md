@@ -357,6 +357,6 @@ send_email(
 ---
 
 ## Related Documentation
-- **Main orchestration**: See `MAIN_DAILY_WORKFLOW.md` for daily cycle
+- **Main orchestration**: See `CLAUDE.md` (Daily Schedule) for the daily cycle
 - **Database health**: See `data/health/DATABASE_HEALTH_WORKFLOWS.md` for sync details
 - **Option Pipeline**: See `strategies/option_pipeline/OPTION_PIPELINE_WORKFLOW.md` for morning OID

@@ -1,6 +1,6 @@
 """
 Verify orchestrator log sanitization against the 5 P1-P5 criteria
-(from `docs/orchestrator_text_log_refactor/`).
+(from `docs/_local/orchestrator_text_log_refactor/`).
 
 Checks the most recent N orchestrator logs for:
   1. Emoji / non-ASCII lines

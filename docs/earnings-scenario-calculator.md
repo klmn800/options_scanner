@@ -166,7 +166,7 @@ All database reads use `datalake_query.db` (never production).
 
 - `tools/earnings_scenario.py` — Calculator module and CLI (~580 lines)
 - `core/tradier_api.py` — `get_contract_greeks()` method for live mode
-- `docs/earnings-scenario-calculator-proposal.md` — Original proposal with research findings
+- `docs/_local/earnings-scenario-calculator-proposal.md` (parked) — Original proposal with research findings
 - `tasks/0011-prd-earnings-scenario-calculator.md` — PRD with all functional requirements
 - `tasks/tasks-0011-prd-earnings-scenario-calculator.md` — Implementation task list (22 sub-tasks, all complete)
 

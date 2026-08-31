@@ -14,7 +14,7 @@ Key design points
 - **Standalone, not integrated with FM.** Paper writes go to `data/paper.db`
   to eliminate the FM-vs-paper write-lock contention found in State A.
 - **NULL conditions = unmonitored.** Positions with `close_conditions_json`
-  null are ignored. This is the deliberate default — see PHASE_B_PLAN.md.
+  null are ignored. This is the deliberate default — see docs/_local/paper_trading/PHASE_B_PLAN.md.
 - **3-state status machine: open → closing → closed.** Engine flips
   `open → closing` on close submit; `paper_poll.py` completes the
   transition to `closed` when it records the fill.

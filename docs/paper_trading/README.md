@@ -1,7 +1,7 @@
 # Paper Trading Platform
 
 > **Status:** State A **LIVE** 2026-05-18. State B (Engine-Managed Exits) **LIVE** 2026-05-19.
-> **Source of truth for design:** [DESIGN.md](DESIGN.md). **Build plans:** [PHASE_1_PLAN.md](PHASE_1_PLAN.md), [PHASE_B_PLAN.md](PHASE_B_PLAN.md).
+> **Source of truth for design:** [DESIGN.md](DESIGN.md). **Build plans:** PHASE_1_PLAN.md + PHASE_B_PLAN.md (parked in `docs/_local/paper_trading/`).
 > **This file** is the operational reference — read here when you need to *use* the system.
 
 ## What this is
@@ -477,8 +477,8 @@ tools/paper_migrate_to_paper_db.py             one-shot Phase B migration (datal
 tools/decimal_formatter.py                     skip_formatting set extended for paper text columns
 scheduled_tasks/start_paper_engine.bat         Task Scheduler entrypoint for the engine
 docs/paper_trading/DESIGN.md                   design + end states + decisions (source of truth)
-docs/paper_trading/PHASE_1_PLAN.md             build plan for State A
-docs/paper_trading/PHASE_B_PLAN.md             build plan for State B
+docs/_local/paper_trading/PHASE_1_PLAN.md             build plan for State A
+docs/_local/paper_trading/PHASE_B_PLAN.md             build plan for State B
 docs/paper_trading/README.md                   this file
 data/paper.db                                  the paper_* tables (Phase B onward)
 ```

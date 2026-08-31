@@ -97,3 +97,7 @@ scheduled_tasks/start_market_analyst_sunday.bat
 scheduled_tasks/start_trading_advisor_research.bat
 scheduled_tasks/start_trading_advisor_saturday.bat
 scheduled_tasks/start_trading_advisor_sunday.bat
+
+# Parked working notes + Claude's session memory (not project docs)
+docs/_local/
+memory/

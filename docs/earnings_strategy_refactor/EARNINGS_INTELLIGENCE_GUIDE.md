@@ -192,4 +192,4 @@ These are set once at creation time and not updated on re-scan.
 - **Straddle Playbook:** `strategies/earnings_intel/docs/EARNINGS_STRADDLE_PLAYBOOK.md` — Trading strategy
 - **Signal Calibration:** CLAUDE.md "Earnings Signal Recalibration" section — Threshold rationale
 - **Performance DB:** `docs/performance_tracking_enhancement/performance_db_schema.md` — `ei_pipeline_performance` table
-- **Refactor Plan:** `docs/earnings_strategy_refactor/REFACTOR_PLAN.md` — Design decisions and research
+- **Refactor Plan:** `docs/_local/earnings_strategy_refactor/REFACTOR_PLAN.md` — Design decisions and research

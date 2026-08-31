@@ -4,7 +4,7 @@ Tradier Paper Broker
 ====================
 Sandbox-only broker client for paper trading. Wraps a `TradierAPI` instance
 configured with `sandbox=True` and exposes the order / account / position
-endpoints needed by the paper trading platform (PHASE_1_PLAN.md).
+endpoints needed by the paper trading platform (docs/_local/paper_trading/PHASE_1_PLAN.md).
 
 Safety:
     Constructor asserts `self.api.sandbox is True`. If `tradier_sandbox.api_key`

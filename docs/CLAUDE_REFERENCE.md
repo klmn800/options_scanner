@@ -269,7 +269,7 @@ python tools/earnings_scenario.py "TOST|25|2026-04-17|CALL" --cost 1.04 --stradd
 - `tools/symbol_lifecycle.py`: CLI for symbol onboarding, offboarding, universe management. See `tools/lifecycle/README.md`.
 - `tools/lifecycle/`: Package with onboarding, offboarding, routing, preflight checks, health check (Phase 6.2), audit trail, UI helpers.
 - `tools/email_reader.py`: Gmail API inbox reader for klmn800alerts@gmail.com (OAuth2, full access)
-- `tools/trade_ingest.py`: Trade execution parser — ingests Robinhood confirmation emails from Gmail into `trade_executions` table. Runs as orchestrator Steps 1.4 + 3.1. Design doc: `docs/trade_ingest/BRAINSTORM.md`.
+- `tools/trade_ingest.py`: Trade execution parser — ingests Robinhood confirmation emails from Gmail into `trade_executions` table. Runs as orchestrator Steps 1.4 + 3.1. Design doc: `docs/_local/trade_ingest/BRAINSTORM.md (parked)`.
 - `strategies/flow_monitor/fm_config.py` & `strategies/option_pipeline/op_config.py`: Strategy configurations
 - `strategies/flow_monitor/fm_earnings_signals.py`: Intraday earnings signal tracker — recomputes straddle underpricing from live scan data every N cycles (~hourly), logs signal upgrades/downgrades vs morning baseline. Console only, config toggle.
 
@@ -302,7 +302,6 @@ result = subprocess.run(
 ## Additional Documentation Index
 
 - **Console Output Developer Guide**: `docs/CONSOLE_DEVELOPER_GUIDE.md` - How to build modules with correct console output (toolkit, taxonomy, roles, patterns, checklist)
-- **AI Dev Tasks Workflow**: `docs/ai-dev-tasks.md` - Full PRD workflow guide
 - **Database Tools**: `docs/database-tools.md` - Detailed tool usage and examples
 - **Trading Style**: `docs/trading-style.md` - Ben's trading approach, constraints, and position management
 - **News Sentiment Design**: `docs/news_sentiment.md` - Architecture decisions, relevance weighting, API budget, deprecation history

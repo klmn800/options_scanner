@@ -2,7 +2,7 @@
 
 > **Account:** [@ThePrintFlow](https://x.com/ThePrintFlow) on X
 > **Status:** Live as of 2026-04-27 (auto-posting via Flow Monitor)
-> **Brainstorm / Phase 2-3 vision:** `docs/social_poster/BRAINSTORM.md`
+> **Brainstorm / Phase 2-3 vision:** `docs/_local/social_poster/BRAINSTORM.md`
 
 ## What it does
 

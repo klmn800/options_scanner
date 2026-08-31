@@ -44,7 +44,7 @@ Each is a coherent stopping point. The work to reach each one has standalone val
 - Paper tables moved to `data/paper.db` to eliminate FM write-lock contention.
 - **Open is still manual; close is automatic for monitored positions only.**
 - Config defaults (`paper_trading.default_close_conditions`) exist for programmatic reference; they are NOT auto-applied to CLI opens.
-- Detailed plan: [`PHASE_B_PLAN.md`](PHASE_B_PLAN.md).
+- Detailed plan: `docs/_local/paper_trading/PHASE_B_PLAN.md` (parked).
 
 ### C. First Auto-Open Consumer — FM Alerts
 - Every FM alert auto-opens a paper trade tagged with the scorer version (`fm_alert_v2`).
@@ -339,7 +339,7 @@ Items we don't need to answer for Phase 1 but should track:
 ## 9. Cross-References
 
 - `core/` — existing Tradier client (live API). Paper client extends/wraps, doesn't replace.
-- `docs/trade_ingest/BRAINSTORM.md` — sibling schema (`trade_executions`) that `paper_executions` mirrors.
+- `docs/_local/trade_ingest/BRAINSTORM.md` — sibling schema (`trade_executions`) that `paper_executions` mirrors.
 - `CLAUDE.md` — decimal policy, two-database workflow, console output design.
 - `MEMORY.md` — once Phase 1 ships, write a topic file `paper_trading_2026-XX.md` and index it.
 - Tradier API docs:
