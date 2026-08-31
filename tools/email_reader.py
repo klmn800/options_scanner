@@ -1,5 +1,5 @@
 """
-Email Reader - Gmail API interface for klmn800alerts@gmail.com
+Email Reader - Gmail API interface for the alerts inbox (config.json gmail_api.account)
 
 Full inbox access for the options scanner system. Used by Claude Code
 to check for messages from Ben, newsletter subscriptions, etc.
@@ -91,7 +91,7 @@ class GmailReader:
             'client_secret_923797423221-jt0utor5k9mg3jjrc8m2jtkcbb65oqmb.apps.googleusercontent.com.json'
         )
         self.token_file = PROJECT_ROOT / gmail_config.get('token_file', 'gmail_token.json')
-        self.account = gmail_config.get('account', 'klmn800alerts@gmail.com')
+        self.account = gmail_config.get('account', '')
 
         self._service = None
 
@@ -393,7 +393,7 @@ def _format_message_row(msg, idx=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Gmail inbox reader for klmn800alerts@gmail.com',
+        description='Gmail inbox reader for the alerts inbox (config gmail_api.account)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Gmail search syntax examples:

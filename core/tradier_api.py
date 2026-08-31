@@ -1737,13 +1737,14 @@ def main():
         with open(args.config, 'r') as f:
             config = json.load(f)
     else:
-        # Default config for testing
-        config = {
-            "tradier": {
-                "api_key": "REDACTED_TRADIER_KEY",
-                "sandbox": False
-            }
-        }
+        # No embedded default key — load the project config.json
+        default_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.json')
+        if not os.path.exists(default_path):
+            print("No config found. Pass --config path/to/config.json (needs tradier.api_key).")
+            sys.exit(1)
+        with open(default_path, 'r') as f:
+            config = json.load(f)
     
     try:
         client = TradierDataClient(config, args.cache_dir)

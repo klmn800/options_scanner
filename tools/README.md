@@ -62,7 +62,7 @@ These are invoked on-demand by Ben or Claude Code for analysis, maintenance, and
 
 | Tool | Purpose | Usage |
 |------|---------|-------|
-| `email_reader.py` | Gmail API reader for klmn800alerts@gmail.com | `python tools/email_reader.py --check` |
+| `email_reader.py` | Gmail API reader for the alerts inbox | `python tools/email_reader.py --check` |
 
 `email_reader.py` requires OAuth2 token (`gmail_token.json`). See CLAUDE.md for full CLI reference.
 

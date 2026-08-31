@@ -460,7 +460,7 @@ The pipeline runs at 5 PM but the information is needed at 6:35 AM. No mechanism
 **Options (not mutually exclusive)**:
 1. **Morning View screen**: Add an earnings tab to the TUI showing upcoming earnings with signals, sorted by actionability
 2. **Enhanced Step 1.2 console output**: Instead of just the (broken) arbitrage scan, also display the top earnings opportunities from `earnings_upcoming` at 6:35 AM
-3. **Email digest**: Send a morning earnings briefing to `klmn800alerts@gmail.com` using existing email infrastructure
+3. **Email digest**: Send a morning earnings briefing to the alerts inbox using existing email infrastructure
 4. **Morning scan query**: Simple SQL query added to morning phase that reads `earnings_upcoming` and displays candidates
 
 Option 2 or 4 is fastest to ship. Option 1 is the richest experience. Option 3 is useful for days Ben isn't at the computer.

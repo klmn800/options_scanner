@@ -6,7 +6,8 @@ Parses Robinhood trade confirmation emails from Gmail and stores
 executions in the `trade_executions` table.
 
 Email flow:
-  Robinhood → account-holder@example.com → klmn800alerts@gmail.com (auto-forward)
+  Robinhood → brokerage account holder's email → alerts inbox (auto-forward)
+  Forwarding sender(s) configured in config.json → trade_ingest.forward_senders
 
 Usage:
     python tools/trade_ingest.py                      # Ingest new emails
@@ -469,8 +470,18 @@ def ingest_from_email(dry_run=False, quiet=False):
         stats['skipped_auth'] = 1
         return stats
 
-    # Search for unread Robinhood execution emails (forwarded)
-    query = '(from:account-holder@example.com OR from:noreply@robinhood.com) (subject:"option order" OR subject:"your order") is:unread'
+    # Search for unread Robinhood execution emails (forwarded).
+    # Sender allowlist: Robinhood direct, plus any personal forwarding
+    # address(es) configured in config.json -> trade_ingest.forward_senders.
+    senders = ['noreply@robinhood.com']
+    try:
+        import json as _json
+        with open(os.path.join(project_root, 'config.json'), 'r', encoding='utf-8') as f:
+            senders += _json.load(f).get('trade_ingest', {}).get('forward_senders', [])
+    except Exception:
+        pass
+    from_clause = ' OR '.join('from:{}'.format(s) for s in senders)
+    query = '({}) (subject:"option order" OR subject:"your order") is:unread'.format(from_clause)
     _log("Searching Gmail: {}".format(query))
 
     try:

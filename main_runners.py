@@ -1009,7 +1009,7 @@ class OrchestratorRunnersMixin:
             "📋 TRADE INGEST",
             [
                 "Mission: Parse Robinhood execution emails from Gmail",
-                "Source: klmn800alerts@gmail.com (auto-forwarded)",
+                "Source: alerts inbox (auto-forwarded)",
                 "Output: trade_executions table (dedup by email_message_id)"
             ]
         )

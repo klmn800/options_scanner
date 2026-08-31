@@ -268,7 +268,7 @@ python tools/earnings_scenario.py "TOST|25|2026-04-17|CALL" --cost 1.04 --stradd
 - `tools/news_sentiment.py`: News sentiment collection and enrichment (replaces `strategies/news_collector/`)
 - `tools/symbol_lifecycle.py`: CLI for symbol onboarding, offboarding, universe management. See `tools/lifecycle/README.md`.
 - `tools/lifecycle/`: Package with onboarding, offboarding, routing, preflight checks, health check (Phase 6.2), audit trail, UI helpers.
-- `tools/email_reader.py`: Gmail API inbox reader for klmn800alerts@gmail.com (OAuth2, full access)
+- `tools/email_reader.py`: Gmail API inbox reader for the alerts inbox (config.json gmail_api.account) (OAuth2, full access)
 - `tools/trade_ingest.py`: Trade execution parser — ingests Robinhood confirmation emails from Gmail into `trade_executions` table. Runs as orchestrator Steps 1.4 + 3.1. Design doc: `docs/_local/trade_ingest/BRAINSTORM.md (parked)`.
 - `strategies/flow_monitor/fm_config.py` & `strategies/option_pipeline/op_config.py`: Strategy configurations
 - `strategies/flow_monitor/fm_earnings_signals.py`: Intraday earnings signal tracker — recomputes straddle underpricing from live scan data every N cycles (~hourly), logs signal upgrades/downgrades vs morning baseline. Console only, config toggle.
