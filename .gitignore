@@ -101,3 +101,6 @@ scheduled_tasks/start_trading_advisor_sunday.bat
 # Parked working notes + Claude's session memory (not project docs)
 docs/_local/
 memory/
+
+# Local backup copies of secret-bearing config (never commit)
+*.bak*

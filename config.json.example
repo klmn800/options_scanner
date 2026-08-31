@@ -204,33 +204,17 @@
         }
     },
     "social_posting": {
+        "_comment": "The Print (@ThePrintFlow) X auto-publisher. Flow Monitor posts qualifying alerts via strategies/flow_monitor/fm_social_notifier.py. OAuth credentials live in credentials.json 'twitter_api', NOT here. See docs/reference/SOCIAL_POSTING_QUICKSTART.md.",
         "enabled": false,
-        "auto_post": false,
-        "platforms": {
-            "reddit": {
-                "enabled": false,
-                "subreddits": [
-                    "options"
-                ],
-                "post_as": "text"
-            },
-            "twitter": {
-                "enabled": false,
-                "thread_mode": true
-            }
-        },
+        "dry_run": true,
         "selection_criteria": {
-            "min_significance_score": 7.0,
-            "min_premium_value": 5000000,
-            "max_posts_per_day": 3,
-            "exclude_earnings_day": true
-        },
-        "timing": {
-            "delay_minutes": 30,
-            "max_age_minutes": 60
+            "min_voi_ratio": 1.0,
+            "exclude_rolls": true,
+            "max_posts_per_day": 30
         }
     },
     "reddit_api": {
+        "_comment": "LEGACY / UNUSED - read only by tools/social_poster.py. No live Reddit posting path exists.",
         "client_id": "YOUR_CLIENT_ID",
         "client_secret": "YOUR_CLIENT_SECRET",
         "username": "YOUR_USERNAME",
@@ -238,6 +222,7 @@
         "user_agent": "OptionsFlowBot/1.0"
     },
     "twitter_api": {
+        "_comment": "LEGACY / UNUSED - read only by tools/social_poster.py (Oct 2025 draft-review poster, never activated). Live X posting reads credentials.json 'twitter_api' instead, which uses 'api_key_secret' (not 'api_secret') and also needs 'bearer_token'.",
         "api_key": "YOUR_API_KEY",
         "api_secret": "YOUR_API_SECRET",
         "access_token": "YOUR_ACCESS_TOKEN",
