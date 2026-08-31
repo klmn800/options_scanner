@@ -132,6 +132,10 @@ phase_header("PRE-MARKET OPERATIONS", phase_number=1)
 
 **Who can call this:** Orchestrator only.
 
+### Thread safety
+
+`beautiful_log`, `create_status_box`, and `phase_header` all emit under a shared module-level `RLock` (`_OUTPUT_LOCK`), so a multi-line box or banner printed from one thread is never torn apart by lines from another. This matters on Fridays, where Step 5.1 (weekly backup) runs on a background thread while the main flow continues into 5.2. The lock guarantees each *unit* is contiguous — it does not guarantee ordering *between* units, so a `[5.1 BG]` box may still land before or after a neighboring main-thread line. Bare `logging.info()` / `print()` calls are not covered; if you need a multi-line block to stay intact across threads, route it through one of the three functions above.
+
 ### _step_header pattern
 
 Not a log_utils function — a local helper pattern used by coordinators for sub-task separators within a phase. Fixed width, 60 characters.

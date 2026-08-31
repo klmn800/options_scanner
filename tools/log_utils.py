@@ -24,6 +24,7 @@ Usage:
 import re
 import sys
 import logging
+import threading
 import unicodedata
 
 # Add project tools to path for timezone_utils
@@ -34,6 +35,13 @@ if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 
 from timezone_utils import now_eastern
+
+# Serializes multi-line console/log emission so a status box or phase header
+# printed from one thread can't be torn apart by lines from another (e.g. the
+# Friday 5.1 weekly-backup thread racing the main flow into 5.2). RLock so a
+# nested call from inside a held section can't deadlock. Uncontended cost is
+# negligible in the single-threaded case.
+_OUTPUT_LOCK = threading.RLock()
 
 
 # --- Internal helpers ---
@@ -248,11 +256,12 @@ def beautiful_log(message, level='info'):
     else:
         console_line = "{} {} - {}".format(emoji, timestamp, message)
 
-    # Console (formatted with emoji + timestamp)
-    _safe_print(console_line)
+    with _OUTPUT_LOCK:
+        # Console (formatted with emoji + timestamp)
+        _safe_print(console_line)
 
-    # Log file (clean message — logging formatter adds its own timestamp)
-    _write_to_file_handler(message, log_level)
+        # Log file (clean message — logging formatter adds its own timestamp)
+        _write_to_file_handler(message, log_level)
 
 
 def create_status_box(title, content_lines, success=True):
@@ -294,15 +303,16 @@ def create_status_box(title, content_lines, success=True):
         box_lines.append("{}{}{}".format(corner_bl, border_char * (max_width - 2), corner_br))
         box_lines.append("")
 
-        # Console: full box with borders
-        for line in box_lines:
-            _safe_print(line)
+        with _OUTPUT_LOCK:
+            # Console: full box with borders
+            for line in box_lines:
+                _safe_print(line)
 
-        # Log file: plain title + indented content (no borders)
-        _write_to_file_handler(title.strip())
-        for line in content_lines:
-            if line.strip():
-                _write_to_file_handler("  {}".format(line.strip()))
+            # Log file: plain title + indented content (no borders)
+            _write_to_file_handler(title.strip())
+            for line in content_lines:
+                if line.strip():
+                    _write_to_file_handler("  {}".format(line.strip()))
 
     except (ValueError, OSError, IOError):
         # Stdout closed or redirected — silently continue
@@ -328,13 +338,14 @@ def phase_header(title, phase_number=None):
     separator = "\u2550" * width  # ═
     padded = header_text.center(width)
 
-    # Console: full banner with ═══ separators
-    console_lines = ["", separator, padded, separator, ""]
-    for line in console_lines:
-        _safe_print(line)
+    with _OUTPUT_LOCK:
+        # Console: full banner with ═══ separators
+        console_lines = ["", separator, padded, separator, ""]
+        for line in console_lines:
+            _safe_print(line)
 
-    # Log file: single compact marker
-    if phase_number is not None:
-        _write_to_file_handler("--- [PHASE {}] {} ---".format(phase_number, title))
-    else:
-        _write_to_file_handler("--- {} ---".format(title.strip()))
+        # Log file: single compact marker
+        if phase_number is not None:
+            _write_to_file_handler("--- [PHASE {}] {} ---".format(phase_number, title))
+        else:
+            _write_to_file_handler("--- {} ---".format(title.strip()))
