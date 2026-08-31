@@ -86,9 +86,23 @@ News enrichment is completely decoupled from watchlist population:
 
 - The hook in `fm_main.py` is wrapped in `try/except` — if the news module can't import, crashes, or the API is down, the watchlist populates normally
 - Budget exhaustion is expected behavior (heavy alert days) — not treated as an error
+- Transient network failures (read/connect timeouts, dropped connections) get one automatic retry inside `AlphaVantageAPI._make_request()` — see `TRANSIENT_RETRY_ATTEMPTS` / `TRANSIENT_RETRY_BACKOFF_SEC` in `core/alphavantage_api.py`. Each attempt spends a daily-budget slot, so the retry count is deliberately 1. Rate-limit responses (`Information`/`Note`) are *not* retried.
 - Two autofix error types for persistent issues:
   - `news_enrichment_module_error` (WARNING): import failure, crash — something is broken in the code
-  - `news_enrichment_all_failed` (WARNING): every API call in a batch returned failure — AV API is likely down or IP-throttled
+  - `news_enrichment_all_failed` (WARNING): a batch failed in a way that looks *systemic* — AV API down, IP-throttled, or bad key
+
+#### `news_enrichment_all_failed` thresholds
+
+An all-failed batch alone is not enough to alarm. FM cycles usually enrich exactly one symbol, so a 1-symbol batch hitting one timeout is a "100% failure rate" carrying no information — that pattern produced false-positive batch-fix sessions on 2026-02-09, 2026-04-01 and 2026-07-28. Two independent triggers now gate the alarm (constants in `tools/news_sentiment.py`):
+
+| Trigger | Constant | Meaning |
+|---------|----------|---------|
+| Large batch wiped out | `AUTOFIX_MIN_ATTEMPTED = 2` | One batch of ≥2 symbols failed entirely — a sample big enough to stand on its own |
+| Sustained failure | `AUTOFIX_MAX_CONSECUTIVE_ALL_FAILED = 3` | 3 all-failed batches in a row, any size — catches a real outage across FM's 1-symbol cycles |
+
+The consecutive counter is process-local (FM runs as one process for the trading day), resets on any successful enrichment, and is reported in the error payload as `consecutive_all_failed_batches`. Below-threshold all-failed batches still emit a `WARNING` to the orchestrator log — they are suppressed from the alarm, never silenced.
+
+**Keep both triggers.** The size trigger alone (tried 2026-02-09) stops the false positives but goes blind to a genuine all-day outage during 1-symbol cycles.
 
 ### Excluded Symbols
 

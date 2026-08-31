@@ -34,6 +34,15 @@ from tools.timezone_utils import now_eastern, eastern_timestamp_string, eastern_
 NEWS_RATE_LIMIT_PER_MINUTE = 5
 NEWS_RATE_LIMIT_PER_DAY = 25
 
+# Transient-network retry policy (added 2026-07-28)
+# A single read timeout used to hard-fail the whole call. Because Flow Monitor
+# cycles usually enrich exactly one symbol, that one blip became a 100% batch
+# failure and tripped the news_enrichment_all_failed alarm (see 2026-07-28
+# 12:48 read timeout). One retry recovers the common case. Held at 1 because
+# every attempt spends a slot of the NEWS_RATE_LIMIT_PER_DAY budget.
+TRANSIENT_RETRY_ATTEMPTS = 1
+TRANSIENT_RETRY_BACKOFF_SEC = 3
+
 class AlphaVantageRateLimiter:
     """Manages Alpha Vantage API request timing to stay within rate limits"""
 
@@ -360,34 +369,58 @@ class AlphaVantageAPI:
             return None
 
     def _make_request(self, params):
-        """Make an API request with rate limiting and error handling"""
+        """Make an API request with rate limiting and error handling.
+
+        Transient network failures (read/connect timeouts, dropped connections)
+        get TRANSIENT_RETRY_ATTEMPTS retries; every other failure mode returns
+        None on the first attempt. Each attempt spends a daily-budget slot and
+        re-runs the rate-limit gate, so the retry count is deliberately small.
+        Rate-limit responses ('Information'/'Note') come back through
+        _handle_response as None and are NOT retried.
+        """
         self.server_rate_limited = False  # Reset per request
-
-        # Check if we can make the request
-        if not self.rate_limiter.can_make_request():
-            logging.warning("Alpha Vantage daily rate limit reached")
-            return None
-
-        # Wait if needed for rate limiting
-        if not self.rate_limiter.wait_if_needed():
-            return None
 
         # Add API key to parameters
         full_params = dict(params)
         full_params['apikey'] = self.api_key
-
-        # Track the request
-        self.total_requests += 1
         function_name = params.get('function', 'unknown')
-        self.requests_by_function[function_name] = self.requests_by_function.get(function_name, 0) + 1
 
-        try:
-            response = self.session.get(self.base_url, params=full_params, timeout=30)
-            return self._handle_response(response)
+        for attempt in range(TRANSIENT_RETRY_ATTEMPTS + 1):
+            # Check if we can make the request
+            if not self.rate_limiter.can_make_request():
+                logging.warning("Alpha Vantage daily rate limit reached")
+                return None
 
-        except requests.exceptions.RequestException as e:
-            logging.error("Alpha Vantage request failed: {}".format(e))
-            return None
+            # Wait if needed for rate limiting
+            if not self.rate_limiter.wait_if_needed():
+                return None
+
+            # Track the request
+            self.total_requests += 1
+            self.requests_by_function[function_name] = self.requests_by_function.get(function_name, 0) + 1
+
+            try:
+                response = self.session.get(self.base_url, params=full_params, timeout=30)
+                return self._handle_response(response)
+
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                if attempt < TRANSIENT_RETRY_ATTEMPTS:
+                    logging.warning("Alpha Vantage transient network error on {} "
+                                    "(attempt {}/{}): {} — retrying in {}s".format(
+                                        function_name, attempt + 1,
+                                        TRANSIENT_RETRY_ATTEMPTS + 1, e,
+                                        TRANSIENT_RETRY_BACKOFF_SEC))
+                    time.sleep(TRANSIENT_RETRY_BACKOFF_SEC)
+                    continue
+                logging.error("Alpha Vantage request failed after {} attempts: {}".format(
+                    TRANSIENT_RETRY_ATTEMPTS + 1, e))
+                return None
+
+            except requests.exceptions.RequestException as e:
+                logging.error("Alpha Vantage request failed: {}".format(e))
+                return None
+
+        return None
 
     def get_news_sentiment(self, tickers=None, topics=None, time_from=None, time_to=None,
                           sort='LATEST', limit=1000):

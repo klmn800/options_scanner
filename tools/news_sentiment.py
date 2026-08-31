@@ -73,6 +73,31 @@ _BULLISH_LABELS = {'Bullish', 'Somewhat-Bullish'}
 _BEARISH_LABELS = {'Bearish', 'Somewhat-Bearish'}
 _NEUTRAL_LABELS = {'Neutral'}
 
+# Autofix alarm tuning for 'news_enrichment_all_failed' (see enrich_watchlist_batch).
+#
+# The alarm exists to catch SYSTEMIC failure — API down, bad key, IP ban. Flow
+# Monitor cycles usually enrich exactly one symbol, so a 1-symbol batch that hits
+# one transient timeout is a "100% failure rate" that carries no information.
+# Firing on it spawned false-positive batch-fix sessions on 2026-02-09 (5x),
+# 2026-04-01 (3x) and 2026-07-28 (1x) — every occurrence a single-symbol batch.
+#
+# Two independent triggers replace the old bare `attempted > 0` check:
+#   1. One batch of >= AUTOFIX_MIN_ATTEMPTED symbols failed entirely — a sample
+#      large enough to stand on its own.
+#   2. AUTOFIX_MAX_CONSECUTIVE_ALL_FAILED batches in a row failed entirely,
+#      whatever their size — this is what catches a genuine outage during FM's
+#      1-symbol cycles, which trigger 1 alone would never see.
+# A 2026-02-09 fix set threshold 1 alone; it was lost before the 2026-04-13
+# repo rebuild. Keep both triggers together — trigger 1 without trigger 2 trades
+# false positives for blindness to real outages.
+AUTOFIX_MIN_ATTEMPTED = 2
+AUTOFIX_MAX_CONSECUTIVE_ALL_FAILED = 3
+
+# Consecutive all-failed batch counter. Process-local by design: Flow Monitor
+# runs as one long-lived process across the trading day, so this spans its
+# cycles. Resets on any successful enrichment and on process restart.
+_consecutive_all_failed_batches = 0
+
 
 # ---------------------------------------------------------------------------
 # Configuration helpers
@@ -615,11 +640,27 @@ def enrich_watchlist_batch(symbols, storage=None, entry_date=None):
     logging.debug("News enrichment batch complete: {} enriched, {} skipped, {} failed, budget_exhausted={}".format(
         stats['enriched'], stats['skipped'], stats['failed'], stats['budget_exhausted']))
 
-    # AUTOFIX: Queue for batch investigation if all non-skipped symbols failed
-    # This indicates a systemic issue (API down, rate limiting, config problem)
-    # Budget exhaustion is expected behavior and NOT queued as an error
+    # AUTOFIX: Queue for batch investigation only when an all-failed batch is
+    # actually evidence of a systemic issue (API down, rate limiting, config
+    # problem). See AUTOFIX_MIN_ATTEMPTED / AUTOFIX_MAX_CONSECUTIVE_ALL_FAILED
+    # for why a bare "everything failed" check is not enough.
+    # Budget exhaustion is expected behavior and NOT queued as an error.
+    global _consecutive_all_failed_batches
+
     attempted = len(symbols) - stats['skipped']
-    if attempted > 0 and stats['enriched'] == 0 and stats['failed'] > 0:
+    all_failed = attempted > 0 and stats['enriched'] == 0 and stats['failed'] > 0
+
+    if stats['enriched'] > 0:
+        _consecutive_all_failed_batches = 0
+    elif all_failed:
+        _consecutive_all_failed_batches += 1
+
+    systemic = all_failed and (
+        attempted >= AUTOFIX_MIN_ATTEMPTED
+        or _consecutive_all_failed_batches >= AUTOFIX_MAX_CONSECUTIVE_ALL_FAILED
+    )
+
+    if systemic:
         try:
             from tools.autofix import queue_error
             queue_error(
@@ -628,6 +669,7 @@ def enrich_watchlist_batch(symbols, storage=None, entry_date=None):
                     'symbols_attempted': attempted,
                     'symbols_failed': stats['failed'],
                     'symbols_skipped': stats['skipped'],
+                    'consecutive_all_failed_batches': _consecutive_all_failed_batches,
                     'budget_exhausted': stats['budget_exhausted'],
                     'trade_date': now_eastern().strftime('%Y-%m-%d'),
                     'hint': 'All news API calls failed. Check Alpha Vantage API status, '
@@ -637,6 +679,14 @@ def enrich_watchlist_batch(symbols, storage=None, entry_date=None):
             )
         except Exception:
             pass  # Autofix queueing itself should never break the pipeline
+    elif all_failed:
+        # Below the alarm threshold, but never fail silently — leave a trail so a
+        # slow-burn failure is visible in the orchestrator log before it alarms.
+        logging.warning("News enrichment: all {} attempted symbol(s) failed "
+                        "(consecutive all-failed batches: {}/{}) — below autofix "
+                        "threshold, not queued".format(
+                            attempted, _consecutive_all_failed_batches,
+                            AUTOFIX_MAX_CONSECUTIVE_ALL_FAILED))
 
     return stats
 
