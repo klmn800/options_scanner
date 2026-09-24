@@ -124,6 +124,36 @@ def _fetch_yfinance_date(symbol):
 # Main refresh function
 # ---------------------------------------------------------------------------
 
+# Spawn the researcher when any unconfirmed row is due within this many days,
+# even on a zero-dispute morning. Mirrors HORIZON_DAYS in
+# agents/earnings_researcher/hooks/inject_context.py -- the hook's unconfirmed
+# backfill is what such a session works on. launcher.py applies the same gate.
+# (2026-09-24; agents/earnings_researcher/analysis/proposal_20260920_spawn_on_due_next_checks.md)
+SPAWN_HORIZON_DAYS = 14
+
+
+def _count_due_unconfirmed(db, today_str, horizon_days=SPAWN_HORIZON_DAYS):
+    """Count unconfirmed earnings_upcoming rows dated today..today+horizon_days.
+
+    Same predicate as the researcher hook's backfill query, so the spawn gate
+    and the injected list agree. Returns 0 on any error (never blocks the run).
+    """
+    try:
+        conn = sqlite3.connect(db, timeout=30)
+        conn.execute("PRAGMA busy_timeout = 30000")
+        n = conn.execute("""
+            SELECT COUNT(*) FROM earnings_upcoming
+            WHERE (date_confirmed = 0 OR date_confirmed IS NULL)
+              AND earnings_date >= ?
+              AND earnings_date <= DATE(?, '+{} days')
+        """.format(int(horizon_days)), (today_str, today_str)).fetchone()[0]
+        conn.close()
+        return int(n or 0)
+    except Exception as e:
+        logging.debug("   Due-unconfirmed count failed: {}".format(e))
+        return 0
+
+
 def run_lite_refresh(db_path=None, perf_db_path=None, days_ahead=21, spawn_agent=True):
     """Run lite daily earnings refresh for near-term unconfirmed symbols.
 
@@ -131,7 +161,8 @@ def run_lite_refresh(db_path=None, perf_db_path=None, days_ahead=21, spawn_agent
         db_path: Path to datalake.db (default: auto-detect)
         perf_db_path: Path to performance.db (default: auto-detect)
         days_ahead: How many days ahead to look (default: 21)
-        spawn_agent: Whether to spawn earnings researcher on disputes (default: True)
+        spawn_agent: Whether to spawn the earnings researcher when there are
+            disputes OR unconfirmed rows due within SPAWN_HORIZON_DAYS (default: True)
 
     Returns:
         dict: {success, symbols_checked, dates_updated, disputes_flagged, dispute_details, duration_seconds}
@@ -166,6 +197,7 @@ def run_lite_refresh(db_path=None, perf_db_path=None, days_ahead=21, spawn_agent
             'dates_updated': 0,
             'disputes_flagged': 0,
             'dispute_details': [],
+            'due_unconfirmed': 0,
             'duration_seconds': time.time() - start_time,
         }
 
@@ -335,9 +367,15 @@ def run_lite_refresh(db_path=None, perf_db_path=None, days_ahead=21, spawn_agent
     else:
         logging.info("   Disputes flagged: 0")
 
-    # Spawn earnings researcher agent if disputes exist
-    if disputes and spawn_agent:
-        _spawn_earnings_researcher(len(disputes))
+    # Spawn the researcher if there are disputes OR any unconfirmed row is due
+    # within SPAWN_HORIZON_DAYS. A zero-dispute morning used to cancel the
+    # session outright, which silently skipped the agent's logged next-check
+    # dates and the hook's unconfirmed backfill (no session 2026-09-16..18 and
+    # 09-21; UEC's stored date was 5 days wrong and caught 2 days out).
+    due_unconfirmed = _count_due_unconfirmed(db, today_str)
+    logging.info("   Unconfirmed due within {}d: {}".format(SPAWN_HORIZON_DAYS, due_unconfirmed))
+    if spawn_agent and (disputes or due_unconfirmed):
+        _spawn_earnings_researcher(len(disputes), due_unconfirmed)
 
     return {
         'success': True,
@@ -345,6 +383,7 @@ def run_lite_refresh(db_path=None, perf_db_path=None, days_ahead=21, spawn_agent
         'dates_updated': dates_updated,
         'disputes_flagged': len(disputes),
         'dispute_details': disputes,
+        'due_unconfirmed': due_unconfirmed,
         'duration_seconds': duration,
     }
 
@@ -353,8 +392,10 @@ def run_lite_refresh(db_path=None, perf_db_path=None, days_ahead=21, spawn_agent
 # Agent spawning
 # ---------------------------------------------------------------------------
 
-def _spawn_earnings_researcher(dispute_count):
+def _spawn_earnings_researcher(dispute_count, due_unconfirmed=0):
     """Spawn earnings researcher agent in a visible window (fire-and-forget).
+
+    Called when dispute_count > 0 or due_unconfirmed > 0 (see run_lite_refresh).
 
     Uses a temp batch file to avoid cmd.exe /k quoting issues with multiple
     quoted paths (cmd /k "prog" "arg" mangles the middle quotes).
@@ -382,6 +423,7 @@ def _spawn_earnings_researcher(dispute_count):
             shell=True,
             cwd=project_root,
         )
-        logging.info("   Spawning earnings date agent for {} symbols...".format(dispute_count))
+        logging.info("   Spawning earnings date agent: {} dispute(s), {} unconfirmed due within {}d...".format(
+            dispute_count, due_unconfirmed, SPAWN_HORIZON_DAYS))
     except Exception as e:
         logging.warning("   Failed to spawn earnings researcher: {}".format(e))
