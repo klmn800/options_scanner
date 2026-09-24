@@ -19,4 +19,8 @@ python agents\earnings_researcher\launcher.py --prepare-only --prompt PROMPT_SUN
 
 REM Step 2: Launch Claude Code as a tab in the existing Windows Terminal window.
 REM wt tabs do NOT inherit this .bat's cwd, so the cd is folded into cmd /k.
-wt -w 0 new-tab --title "Earnings Researcher (Sunday)" cmd /k "cd /d E:\options_scanner\agents\earnings_researcher && claude --permission-mode auto @.session_prompt.md"
+REM --model opus: the Sunday calibration pass runs on the current Opus (alias,
+REM not a pinned ID). Daily sessions run on Sonnet via the folder default in
+REM .claude/settings.local.json and launcher.py's DAILY_MODEL; the CLI flag
+REM overrides that default here. Keep in sync with launcher.py MAINTENANCE_MODEL.
+wt -w 0 new-tab --title "Earnings Researcher (Sunday)" cmd /k "cd /d E:\options_scanner\agents\earnings_researcher && claude --model opus --permission-mode auto @.session_prompt.md"
