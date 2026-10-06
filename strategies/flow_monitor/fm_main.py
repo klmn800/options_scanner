@@ -28,7 +28,7 @@ from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime
 from pathlib import Path
 
-from strategies.flow_monitor.fm_config import FMConfig, shutdown_event
+from strategies.flow_monitor.fm_config import FMConfig, shutdown_event, create_with_network_wait
 from strategies.flow_monitor.fm_storage import FlowMonitorStorage
 from strategies.flow_monitor.fm_collector import FMCollector, MAG7_SYMBOLS, get_symbols_klmn800
 from strategies.flow_monitor.fm_analyzer import FMAnalyzer
@@ -1276,8 +1276,8 @@ def run_pre_market():
     """
     start_time = time.time()
 
-    # Initialize components
-    config = FMConfig()
+    # Initialize components (wait out ISP/DNS drops instead of killing the day's FM run)
+    config = create_with_network_wait(FMConfig, 'FM config', stop_event=shutdown_event)
     storage = FlowMonitorStorage(config)
 
     # Initialize stats for failure path
@@ -1408,10 +1408,10 @@ def run_market_hours(early_start=False):
               session_stats has keys: total_cycles, successful_cycles, failed_cycles, timing,
                   errors, missing_quotes, failed_options, news_enrichment
     """
-    # Initialize components
-    config = FMConfig()
+    # Initialize components (wait out ISP/DNS drops instead of killing the day's FM run)
+    config = create_with_network_wait(FMConfig, 'FM config', stop_event=shutdown_event)
     storage = FlowMonitorStorage(config)
-    collector = FMCollector()
+    collector = create_with_network_wait(FMCollector, 'FM collector', stop_event=shutdown_event)
     analyzer = FMAnalyzer(storage)
     alerts = FMAlerts(config, storage)
     symbols = get_symbols_klmn800()

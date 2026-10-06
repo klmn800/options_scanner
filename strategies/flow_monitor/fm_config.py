@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 import threading
 
@@ -121,7 +122,12 @@ class FMConfig:
                 logging.debug("Tradier API client initialized successfully")
             else:
                 logging.error("Failed to connect to Tradier API")
-                raise ConnectionError("Tradier API connection test failed")
+                err = ConnectionError("Tradier API connection test failed")
+                # Network-class failures (DNS, refused, timeout) during the probe, as opposed
+                # to auth/HTTP errors. create_with_network_wait() uses this to decide whether
+                # the failure is worth waiting out.
+                err.network_errors = getattr(self._tradier_client.api, 'connection_errors', 0)
+                raise err
                 
         except ImportError as e:
             logging.error("Failed to import TradierDataClient: {}".format(e))
@@ -209,6 +215,43 @@ class FMConfig:
         defaults.update(roll_params)
 
         return defaults
+
+
+def create_with_network_wait(factory, label, max_wait_seconds=600, retry_interval=15, stop_event=None):
+    """Call factory() (FMConfig, FMCollector, ...), waiting out network outages at startup.
+
+    test_connection() already retries for ~45s, which covers Tradier gateway blips but not
+    ISP/DNS drops: on 2026-10-06 api.tradier.com stopped resolving for 1-2 minutes at a time,
+    FM init at 9:15 raised, and the whole main.py run died until a manual restart.
+
+    Only a ConnectionError whose probe hit network-class errors (DNS, refused, timeout) is
+    retried, for up to max_wait_seconds. Auth/HTTP/config failures re-raise immediately.
+    """
+    deadline = time.time() + max_wait_seconds
+    round_num = 0
+    while True:
+        try:
+            result = factory()
+            if round_num > 0:
+                logging.warning("{} initialized after network outage ({} retry rounds)".format(label, round_num))
+            return result
+        except ConnectionError as e:
+            if getattr(e, 'network_errors', 0) <= 0:
+                raise
+            if stop_event is not None and stop_event.is_set():
+                raise
+            if time.time() >= deadline:
+                logging.error("{} init: network still unreachable after {}s - giving up".format(
+                    label, max_wait_seconds))
+                raise
+            round_num += 1
+            logging.warning("{} init: Tradier unreachable (network error) - retrying in {}s "
+                            "(round {}, up to {}s total)".format(label, retry_interval, round_num, max_wait_seconds))
+            if stop_event is not None:
+                if stop_event.wait(retry_interval):
+                    raise
+            else:
+                time.sleep(retry_interval)
 
 
 # Quick Test
