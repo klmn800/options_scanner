@@ -229,6 +229,10 @@ class AlphaVantageAPI:
         self.total_requests = 0
         self.requests_by_function = {}
         self.server_rate_limited = False  # Set when AV returns 'Information' response
+        # Set when the last request gave up on a transport error (timeout, DNS,
+        # refused/dropped connection) — no HTTP response was ever received, so
+        # the failure says nothing about AV itself. Usually the local network.
+        self.last_failure_transport = False
 
         # Set up session for connection pooling
         self.session = requests.Session()
@@ -379,6 +383,7 @@ class AlphaVantageAPI:
         _handle_response as None and are NOT retried.
         """
         self.server_rate_limited = False  # Reset per request
+        self.last_failure_transport = False  # Reset per request
 
         # Add API key to parameters
         full_params = dict(params)
@@ -414,6 +419,7 @@ class AlphaVantageAPI:
                     continue
                 logging.error("Alpha Vantage request failed after {} attempts: {}".format(
                     TRANSIENT_RETRY_ATTEMPTS + 1, e))
+                self.last_failure_transport = True
                 return None
 
             except requests.exceptions.RequestException as e:

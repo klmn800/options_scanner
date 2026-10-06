@@ -90,6 +90,15 @@ _NEUTRAL_LABELS = {'Neutral'}
 # A 2026-02-09 fix set threshold 1 alone; it was lost before the 2026-04-13
 # repo rebuild. Keep both triggers together — trigger 1 without trigger 2 trades
 # false positives for blindness to real outages.
+#
+# Transport failures (timeout / DNS / refused connection, after the client's own
+# retry) abort the rest of the batch: the network is down, so the remaining
+# symbols would fail the same way and each attempt burns a daily-budget slot.
+# The skipped symbols are picked up by the post-market NULL-sentiment backfill.
+# Such a batch counts as 1 attempted, so only trigger 2 can alarm on it — a
+# sustained outage still alarms, a 2-minute local DNS blip no longer does
+# (2026-10-06: 3-symbol batch failed on getaddrinfo while Tradier and X were
+# failing to resolve at the same moment, recovered by the next cycle).
 AUTOFIX_MIN_ATTEMPTED = 2
 AUTOFIX_MAX_CONSECUTIVE_ALL_FAILED = 3
 
@@ -568,6 +577,7 @@ def enrich_watchlist_batch(symbols, storage=None, entry_date=None):
         'skipped': 0,
         'failed': 0,
         'budget_exhausted': False,
+        'transport_failure': False,  # Batch aborted on a network-level failure
         'details': [],  # Per-symbol results: [{symbol, score, label, articles}, ...]
     }
 
@@ -633,6 +643,16 @@ def enrich_watchlist_batch(symbols, storage=None, entry_date=None):
                                     "skipping remaining symbols".format(symbol))
                     break
                 stats['failed'] += 1
+                # Network-level failure: Alpha Vantage was never reached. Don't
+                # burn budget slots on the rest of the batch.
+                if getattr(av_client.api, 'last_failure_transport', False):
+                    stats['transport_failure'] = True
+                    remaining = len(symbols) - stats['enriched'] - stats['skipped'] - stats['failed']
+                    if remaining > 0:
+                        stats['skipped'] += remaining
+                        logging.warning("Alpha Vantage unreachable (network error) on {} — "
+                                        "skipping remaining {} symbol(s)".format(symbol, remaining))
+                    break
         except Exception as e:
             logging.error("News enrichment error for {}: {}".format(symbol, e))
             stats['failed'] += 1
@@ -671,9 +691,11 @@ def enrich_watchlist_batch(symbols, storage=None, entry_date=None):
                     'symbols_skipped': stats['skipped'],
                     'consecutive_all_failed_batches': _consecutive_all_failed_batches,
                     'budget_exhausted': stats['budget_exhausted'],
+                    'transport_failure': stats['transport_failure'],
                     'trade_date': now_eastern().strftime('%Y-%m-%d'),
                     'hint': 'All news API calls failed. Check Alpha Vantage API status, '
-                            'IP rate limiting, or API key validity.',
+                            'IP rate limiting, or API key validity. If transport_failure '
+                            'is true, AV was never reached — check local network/DNS.',
                 },
                 severity='WARNING'
             )
