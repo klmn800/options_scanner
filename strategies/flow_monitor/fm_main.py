@@ -1493,6 +1493,8 @@ def run_market_hours(early_start=False):
     pre_open_scan_done = False
     last_cycle_start_time = None
     consecutive_collection_failures = 0  # Tolerate transient network blips before escalating
+    connectivity_outage_start = None  # time.time() of the first failed cycle in the current streak
+    CONNECTIVITY_ESCALATE_SECONDS = 600  # same window create_with_network_wait gives startup
 
     # Market hours monitoring loop
     while not shutdown_event.is_set():
@@ -1557,6 +1559,7 @@ def run_market_hours(early_start=False):
 
             if scan_timestamp:
                 consecutive_collection_failures = 0
+                connectivity_outage_start = None
                 api_elapsed = collection_elapsed - storage_elapsed
                 beautiful_log("Collection complete ({:.1f}s — API: {:.1f}s + DB Write: {:.1f}s)".format(
                     collection_elapsed, api_elapsed, storage_elapsed), 'success')
@@ -1767,16 +1770,23 @@ def run_market_hours(early_start=False):
 
             else:
                 logging.warning("⚠️ Collection failed - skipping analysis")
-                # Connectivity outages (2026-10-06: intermittent ISP/DNS drops, 3x in 15 min)
+                # Connectivity outages (2026-10-06: intermittent ISP/DNS drops of 1-11 min)
                 # fail a whole cycle. If this cycle's requests hit network-class errors
-                # (DNS, refused, timeout), skip and retry next cycle; escalate only if it
-                # persists 3 consecutive cycles. Any other failure escalates immediately.
+                # (DNS, refused, timeout), skip and retry next cycle; escalate only once the
+                # outage has lasted CONNECTIVITY_ESCALATE_SECONDS. A failed cycle takes ~80s,
+                # so a cycle-count limit (was 3) gave up after ~4 min. Escalating sooner only
+                # exits main.py and restarts into the same outage. Any other failure
+                # escalates immediately.
                 conn_errors = getattr(api_client, 'connection_errors', 0) - conn_errors_before
+                outage_seconds = 0
                 if conn_errors > 0:
                     consecutive_collection_failures += 1
-                if conn_errors > 0 and consecutive_collection_failures < 3:
-                    logging.warning("Collection failed on {} network errors (connectivity failure {}/3) - retrying next cycle".format(
-                        conn_errors, consecutive_collection_failures))
+                    if connectivity_outage_start is None:
+                        connectivity_outage_start = cycle_start
+                    outage_seconds = time.time() - connectivity_outage_start
+                if conn_errors > 0 and outage_seconds < CONNECTIVITY_ESCALATE_SECONDS:
+                    logging.warning("Collection failed on {} network errors (connectivity failure #{}, outage {:.0f}s of {}s allowed) - retrying next cycle".format(
+                        conn_errors, consecutive_collection_failures, outage_seconds, CONNECTIVITY_ESCALATE_SECONDS))
                 else:
                     # AUTOFIX INTEGRATION: Collection returned False/None (persistent)
                     from tools.autofix import handle_error
@@ -1794,6 +1804,7 @@ def run_market_hours(early_start=False):
                             'location': 'orchestrator',
                             'network_errors_this_cycle': conn_errors,
                             'consecutive_connectivity_failures': consecutive_collection_failures,
+                            'connectivity_outage_seconds': round(outage_seconds, 1),
                             'main_py_pid': os.getppid()
                         },
                         severity='CRITICAL'

@@ -42,6 +42,12 @@ MARKET_DATA_RATE_LIMIT = 120
 STANDARD_DATA_RATE_LIMIT = 120
 TRADING_RATE_LIMIT = 60
 
+# (connect, read) seconds. Without a timeout a socket that stalls mid-outage blocks forever:
+# on 2026-10-06 one FM chain request (GTLB) hung during an ISP/DNS drop and froze the
+# whole Flow Monitor for 70 min with no error raised. Read timeout is per-gap between
+# bytes, not total transfer time, so large responses are unaffected.
+REQUEST_TIMEOUT = (10, 60)
+
 
 class RateLimiter:
     """Manages API request timing to stay within rate limits"""
@@ -238,9 +244,9 @@ class TradierAPI:
         
         try:
             if method.upper() == 'GET':
-                response = self.session.get(url, params=params)
+                response = self.session.get(url, params=params, timeout=REQUEST_TIMEOUT)
             elif method.upper() == 'POST':
-                response = self.session.post(url, params=params, data=data)
+                response = self.session.post(url, params=params, data=data, timeout=REQUEST_TIMEOUT)
             else:
                 logging.error(f"Unsupported HTTP method: {method}")
                 return None
