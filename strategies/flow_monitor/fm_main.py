@@ -1712,7 +1712,7 @@ def run_market_hours(early_start=False):
                     # Dip detection phase
                     print("")
                     beautiful_log("Starting FM Dip Detection", 'info')
-                    fm_watchlist.update_prices_and_detect(storage, current_prices)
+                    fm_watchlist.update_prices_and_detect(storage, current_prices, config=config)
 
                 except Exception as watchlist_error:
                     logging.error("Watchlist update error (non-critical): {}".format(watchlist_error))

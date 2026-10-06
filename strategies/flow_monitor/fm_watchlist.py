@@ -266,7 +266,7 @@ def update_daily_watchlist(trade_date, storage, scan_timestamp):
         return stats
 
 
-def update_prices_and_detect(storage, current_prices_dict):
+def update_prices_and_detect(storage, current_prices_dict, config=None):
     """Update current prices and detect dip signals using z-score logic
 
     Uses volatility-normalized z-scores instead of flat 5% thresholds.
@@ -275,6 +275,10 @@ def update_prices_and_detect(storage, current_prices_dict):
     Args:
         storage: FlowMonitorStorage instance
         current_prices_dict: Dict mapping symbol -> current_ul_price
+        config: FMConfig to read dip thresholds from. Pass the caller's existing
+            instance: building a new FMConfig runs a Tradier connection test, so a
+            network blip would fail dip detection even though the prices are
+            already in hand. Only standalone callers should leave this None.
 
     Returns:
         dict: Statistics (prices_updated, dips_detected, zscore_detections, fallback_detections)
@@ -289,7 +293,8 @@ def update_prices_and_detect(storage, current_prices_dict):
 
     try:
         # Load configuration
-        config = FMConfig()
+        if config is None:
+            config = FMConfig()
         dip_config = config.get_dip_thresholds()
 
         use_zscore = dip_config['use_zscore_detection']
