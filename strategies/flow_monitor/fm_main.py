@@ -1492,6 +1492,7 @@ def run_market_hours(early_start=False):
     closing_scan_done = False
     pre_open_scan_done = False
     last_cycle_start_time = None
+    consecutive_collection_failures = 0  # Tolerate transient network blips before escalating
 
     # Market hours monitoring loop
     while not shutdown_event.is_set():
@@ -1540,6 +1541,7 @@ def run_market_hours(early_start=False):
         sync_success = False
         sync_rows = 0
         earnings_signal_elapsed = 0
+        trade_ingest_elapsed = 0
         scan_timestamp = None  # Initialize to track success
         alerts_stored = 0  # Tracks alerts written this cycle (for performance DB)
         cycle_news_stats = None  # Per-cycle news enrichment results
@@ -1552,6 +1554,7 @@ def run_market_hours(early_start=False):
             storage_elapsed = getattr(collector, 'last_storage_elapsed', 0.0)
 
             if scan_timestamp:
+                consecutive_collection_failures = 0
                 api_elapsed = collection_elapsed - storage_elapsed
                 beautiful_log("Collection complete ({:.1f}s — API: {:.1f}s + DB Write: {:.1f}s)".format(
                     collection_elapsed, api_elapsed, storage_elapsed), 'success')
@@ -1762,26 +1765,40 @@ def run_market_hours(early_start=False):
 
             else:
                 logging.warning("⚠️ Collection failed - skipping analysis")
+                consecutive_collection_failures += 1
 
-                # AUTOFIX INTEGRATION: Collection returned False/None
-                from tools.autofix import handle_error
-                handle_error(
-                    error_type='fm_collection_failed',
-                    context={
-                        'symbols_attempted': len(symbols),
-                        'scan_timestamp': 'N/A',
-                        'cycle_number': cycle,
-                        'collection_time_seconds': collection_elapsed,
-                        'trade_date': now_eastern().strftime('%Y-%m-%d'),
-                        'market_phase': 'market_hours',
-                        'monitor_active': True,
-                        'cycle_type': 'real_time_monitoring',
-                        'location': 'orchestrator',
-                        'main_py_pid': os.getppid()
-                    },
-                    severity='CRITICAL'
-                )
-                # Never reached - handle_error exits with sys.exit(1)
+                # Transient DNS/network outages (2026-10-06: api.tradier.com stopped resolving
+                # for short stretches 3x in 15 min) fail a whole cycle. Skip and retry next
+                # cycle; only escalate if the failure persists across 3 consecutive cycles.
+                import socket
+                try:
+                    socket.getaddrinfo('api.tradier.com', 443)
+                    dns_status = 'resolves'
+                except OSError as dns_err:
+                    dns_status = 'FAILS ({})'.format(dns_err)
+                if consecutive_collection_failures < 3:
+                    logging.warning("Collection failure {}/3 (api.tradier.com DNS {}) - retrying next cycle".format(
+                        consecutive_collection_failures, dns_status))
+                else:
+                    # AUTOFIX INTEGRATION: Collection returned False/None (persistent)
+                    from tools.autofix import handle_error
+                    handle_error(
+                        error_type='fm_collection_failed',
+                        context={
+                            'symbols_attempted': len(symbols),
+                            'scan_timestamp': 'N/A',
+                            'cycle_number': cycle,
+                            'collection_time_seconds': collection_elapsed,
+                            'trade_date': now_eastern().strftime('%Y-%m-%d'),
+                            'market_phase': 'market_hours',
+                            'monitor_active': True,
+                            'cycle_type': 'real_time_monitoring',
+                            'location': 'orchestrator',
+                            'main_py_pid': os.getppid()
+                        },
+                        severity='CRITICAL'
+                    )
+                    # Never reached - handle_error exits with sys.exit(1)
 
         except Exception as e:
             logging.error("❌ Market cycle error: {}".format(e))
@@ -1928,8 +1945,10 @@ def run_market_hours(early_start=False):
         if is_pre_open_cycle:
             now = now_eastern()
             target = now.replace(hour=9, minute=30, second=0, microsecond=0)
-            wait_seconds = int((target - now).total_seconds())
-            if wait_seconds > 0:
+            # +1: int() truncates fractional seconds, which woke us at 9:29:59 and the
+            # loop then misclassified the first market cycle as the closing scan (2026-10-06)
+            wait_seconds = int((target - now).total_seconds()) + 1
+            if wait_seconds > 1:
                 beautiful_log("Pre-open scan complete — waiting until 9:30 AM market open ({:.1f} min)".format(
                     wait_seconds / 60), 'info')
                 # Interruptible sleep — check shutdown every 5 seconds
