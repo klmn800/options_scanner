@@ -67,7 +67,7 @@ def check_escalation_threshold(error_type):
                 # Convert error_type to pattern (e.g., 'duplicate_contracts' → 'duplicate.*contract')
                 error_pattern = error_type.replace('_', '.*')
                 import re
-                pattern = re.compile(r'## \[\d{2}:\d{2}\].*{}.*'.format(error_pattern), re.IGNORECASE)
+                pattern = re.compile(r'## \[\d{{2}}:\d{{2}}\].*{}.*'.format(error_pattern), re.IGNORECASE)
                 attempt_count = len(pattern.findall(content))
         except Exception as e:
             print("   ⚠️  Could not read journal: {}".format(e))
@@ -381,65 +381,10 @@ def launch_claude_fix(error_context):
 
         # Note: Launch tracking now handled by error queue system
 
-        # Auto-accept the bypass permissions prompt
-        print("🤖 Sending keystrokes to accept bypass permissions prompt...")
-        auto_accept_bypass_prompt()
-
         return True
     else:
         print("❌ Failed to launch Claude Code: {}".format(result.stderr if result.stderr else "Unknown error"))
         return False
-
-
-def auto_accept_bypass_prompt():
-    """Automatically send keystrokes to accept Claude Code's bypass permissions prompt
-
-    Waits 15 seconds for Claude Code window to appear, then sends "2" + Enter
-    to accept the bypass permissions confirmation.
-    """
-    import time
-
-    # Give Claude Code window time to appear and render the prompt
-    print("   Waiting 15 seconds for Claude Code window to render...")
-    time.sleep(15)
-
-    try:
-        # Use pyautogui if available (cross-platform)
-        try:
-            import pyautogui
-            print("   Sending keystrokes: '2' + Enter")
-            pyautogui.write('2')
-            pyautogui.press('enter')
-            print("   ✅ Keystrokes sent successfully (pyautogui)")
-            return
-        except ImportError:
-            pass
-
-        # Fallback to Windows SendKeys via PowerShell
-        ps_script = """
-        Add-Type -AssemblyName System.Windows.Forms
-        Start-Sleep -Milliseconds 500
-        [System.Windows.Forms.SendKeys]::SendWait("2{{ENTER}}")
-        """
-
-        result = subprocess.run(
-            ['powershell', '-Command', ps_script],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=5
-        )
-
-        if result.returncode == 0:
-            print("   ✅ Keystrokes sent successfully (PowerShell SendKeys)")
-        else:
-            print("   ⚠️  PowerShell SendKeys failed: {}".format(result.stderr))
-            print("   Note: Claude Code may still be waiting for manual confirmation")
-
-    except Exception as e:
-        print("   ⚠️  Failed to send keystrokes: {}".format(e))
-        print("   Note: You may need to manually accept bypass permissions prompt")
 
 
 if __name__ == "__main__":

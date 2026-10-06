@@ -1549,6 +1549,8 @@ def run_market_hours(early_start=False):
         try:
             # Collection phase
             collection_start = time.time()
+            api_client = getattr(collector.tradier_client, 'api', None)
+            conn_errors_before = getattr(api_client, 'connection_errors', 0)
             scan_timestamp = collector.run_once(symbols, closing_scan=closing_scan_done, pre_open_scan=is_pre_open_cycle)
             collection_elapsed = time.time() - collection_start
             storage_elapsed = getattr(collector, 'last_storage_elapsed', 0.0)
@@ -1765,20 +1767,16 @@ def run_market_hours(early_start=False):
 
             else:
                 logging.warning("⚠️ Collection failed - skipping analysis")
-                consecutive_collection_failures += 1
-
-                # Transient DNS/network outages (2026-10-06: api.tradier.com stopped resolving
-                # for short stretches 3x in 15 min) fail a whole cycle. Skip and retry next
-                # cycle; only escalate if the failure persists across 3 consecutive cycles.
-                import socket
-                try:
-                    socket.getaddrinfo('api.tradier.com', 443)
-                    dns_status = 'resolves'
-                except OSError as dns_err:
-                    dns_status = 'FAILS ({})'.format(dns_err)
-                if consecutive_collection_failures < 3:
-                    logging.warning("Collection failure {}/3 (api.tradier.com DNS {}) - retrying next cycle".format(
-                        consecutive_collection_failures, dns_status))
+                # Connectivity outages (2026-10-06: intermittent ISP/DNS drops, 3x in 15 min)
+                # fail a whole cycle. If this cycle's requests hit network-class errors
+                # (DNS, refused, timeout), skip and retry next cycle; escalate only if it
+                # persists 3 consecutive cycles. Any other failure escalates immediately.
+                conn_errors = getattr(api_client, 'connection_errors', 0) - conn_errors_before
+                if conn_errors > 0:
+                    consecutive_collection_failures += 1
+                if conn_errors > 0 and consecutive_collection_failures < 3:
+                    logging.warning("Collection failed on {} network errors (connectivity failure {}/3) - retrying next cycle".format(
+                        conn_errors, consecutive_collection_failures))
                 else:
                     # AUTOFIX INTEGRATION: Collection returned False/None (persistent)
                     from tools.autofix import handle_error
@@ -1794,6 +1792,8 @@ def run_market_hours(early_start=False):
                             'monitor_active': True,
                             'cycle_type': 'real_time_monitoring',
                             'location': 'orchestrator',
+                            'network_errors_this_cycle': conn_errors,
+                            'consecutive_connectivity_failures': consecutive_collection_failures,
                             'main_py_pid': os.getppid()
                         },
                         severity='CRITICAL'

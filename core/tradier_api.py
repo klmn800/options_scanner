@@ -197,6 +197,9 @@ class TradierAPI:
         self.total_requests = 0
         self.requests_by_endpoint = {}
         self.requests_by_method = {'GET': 0, 'POST': 0}
+        # Network-class failures (DNS, refused, timeout). Callers diff this before/after
+        # a batch to tell "internet is down" apart from code/data failures.
+        self.connection_errors = 0
         
         # Set up session for connection pooling
         self.session = requests.Session()
@@ -245,6 +248,8 @@ class TradierAPI:
             return self._handle_response(response)
         
         except requests.exceptions.RequestException as e:
+            if isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+                self.connection_errors += 1
             logging.error(f"Request failed: {e}")
             return None
     
