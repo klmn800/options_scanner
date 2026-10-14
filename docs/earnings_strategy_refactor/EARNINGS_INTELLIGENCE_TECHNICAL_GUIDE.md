@@ -160,7 +160,13 @@ relative_underpricing_pct = (historical_avg_move_pct - straddle_expected_move_pc
 3. ATM strike = strike closest to the close; needs both CALL and PUT with `last_price > 0`.
 4. `(call + put) × 0.85 / close × 100`.
 
-The **0.85 multiplier** is an industry-standard haircut for spread and execution cost, so the comparison is against the *tradeable* expected move. This makes relative underpricing slightly higher than it would be against the raw straddle, which is intentional.
+The **0.85 multiplier** is described in the code (`get_straddle_expected_move`, `determine_earnings_play_signal`) as an industry-standard haircut for spread and execution cost. That rationale has not been independently verified. Its effects are measurable, though:
+
+- **It alone produces a WATCH signal.** A stock whose recent average move exactly equals the raw straddle scores (1/0.85 − 1) = **+17.6%** relative underpricing, which is above the 15% WATCH threshold.
+- **About half of actionable signals depend on it.** Across the 1,511 events with outcomes as of 2026-10-14, recomputing without the haircut cuts WATCH-or-better signals from 216 to 107, and STRONG BUY from 68 to 34.
+- **Outcome labels inherit it.** `straddle_outcome` compares the actual move to the haircut figure, so PROFIT (≥110%) corresponds to only 93.5% of the raw straddle, and FLAT (≥95%) to 80.75%. Measured against the raw straddle, PROFIT labels drop from 379 to 289.
+
+The straddle and the historical average are also not quite like-for-like. The straddle is priced at `last_price` (not the bid/ask midpoint), on the first expiration on or after earnings, which can be weeks out and so carries non-earnings time value. The historical average is a 1-day move. Any threshold calibration should treat the multiplier as a parameter to test, not a given.
 
 On the UPDATE, `straddle_expected_move_pct = COALESCE(new, existing)`: if today's straddle can't be built (thin chain), the last good value is kept.
 
@@ -457,7 +463,7 @@ Not persisted to this table: lite-refresh metrics, the daily archive count, and 
 |------|--------|
 | Signal threshold calibration | Data available; not started |
 | Arbitrage scanner re-enable | Waiting on design decision |
-| Post-earnings actuals (`actual_eps` on `earnings_events`) | Not implemented |
+| Post-earnings actuals (`actual_eps` on `earnings_events`) | Not implemented. Both archive queries (`ei_main.py` sub-step 3, `ei_collector._archive_past_earnings`) insert a literal NULL for `actual_eps` and `estimated_eps`. As of 2026-10-14, all 2,216 pipeline-archived events (`source = 'earnings_upcoming'`) lack actual EPS; backfilled history (yfinance/Finnhub) has it. The estimate is carried in `eps_estimate` instead, so readers of `estimated_eps` (e.g. the Morning View trading journal) see nothing for these rows. |
 | Lite-refresh metrics in `ei_pipeline_performance` | Not implemented |
 
 Completed since the last revision: earnings scenario calculator (`tools/earnings_scenario.py`, doc `docs/earnings-scenario-calculator.md`); Morning View earnings screens (`morning_view/screens/earnings_browser.py`); snapshot ramp-up (primary snapshot path active since March 2026).
