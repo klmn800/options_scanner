@@ -3,419 +3,464 @@
 **System:** Options Scanner — Earnings Intelligence Strategy
 **Location:** `strategies/earnings_intel/`
 **Authors:** Ben and Claude
-**Last updated:** 2026-02-26
-**Status:** Production. Phases 0-3 of the February 2026 refactor are complete. Signal thresholds are provisional (calibration pending ~March 2026).
+**Last updated:** 2026-10-14
+**Status:** Production. Daily pipeline is 8 sub-steps (plus a 3.5 backfill). Earnings dates are yfinance-primary with a confirmation layer (`date_confirmed`) maintained by the Earnings Researcher agent. Signal thresholds are still the provisional 2026-02-10 values — outcome data now exists to calibrate them, but no recalibration has been done.
+
+> Code references below name functions rather than line numbers, because line numbers drift. Figures marked "as of 2026-10-14" were measured from `datalake_query.db` on that date.
 
 ---
 
 ## 1. System Purpose & Philosophy
 
-The Earnings Intelligence (EI) system identifies **mispriced options around earnings events** by comparing what the market expects a stock to move versus what it has historically moved. When the market systematically underprices a stock's typical earnings move, EI flags the opportunity.
+The Earnings Intelligence (EI) system identifies **mispriced options around earnings events** by comparing what the market expects a stock to move versus what it has recently moved. When the market underprices a stock's recent earnings moves, EI flags the opportunity.
 
-EI operates on a **proactive** model: it scans the entire KLMN 800 universe and surfaces opportunities *before* earnings, rather than reacting to flow or price signals after the fact. This distinguishes it from the Flow Monitor, which is reactive — detecting unusual options activity as it happens.
+EI operates on a **proactive** model: it scans the entire KLMN universe and surfaces opportunities *before* earnings, rather than reacting to flow or price signals after the fact. This distinguishes it from the Flow Monitor, which is reactive — detecting unusual options activity as it happens.
 
 The system produces two investor-facing outputs:
 
-1. **`earnings_upcoming`** — the full universe of upcoming earnings with expected moves, signals, and timing data. Updated daily (expected moves recalculation) and weekly (Finnhub calendar refresh).
-2. **`earnings_watchlist`** — a filtered, enriched view of the best opportunities. Only stocks meeting the signal threshold and liquidity gate appear here. This is the "action list."
+1. **`earnings_upcoming`** — the full universe of upcoming earnings with expected moves, signals, timing, and date-confirmation state. Signals recalculated daily; calendar refreshed daily for near-term dates (lite refresh) and weekly for the full universe.
+2. **`earnings_watchlist`** — a filtered, enriched view of the best opportunities. Only stocks meeting the signal threshold and liquidity gate enter. This is the "action list."
+
+And one outcome record:
+
+3. **`earnings_events` + `earnings_moves`** — every past event with the signal it carried, what actually happened, and whether a straddle would have paid (Section 9).
 
 Design principles:
-- **Morning-first**: The pipeline runs as Step 1.2 in the daily orchestrator, before market open. Signals are fresh when the trading day begins.
-- **Fail gracefully**: Each of the 6 pipeline sub-steps runs in its own `try/except`. A failure in news enrichment does not block watchlist population. A failure in snapshots does not block post-earnings calculations.
-- **Two-source resilience**: Finnhub is the primary earnings calendar, YFinance is the fallback. Earnings snapshots are the primary IV/price source for post-earnings analysis, `historical_prices` is the fallback.
-- **No fake data**: Every metric is measured from actual database state. If a calculation can't be performed (missing price data, empty snapshots), the column is NULL — never estimated or assumed.
+- **Morning-first**: The pipeline runs as Step 1.2 in the daily orchestrator, before market open.
+- **Fail gracefully**: Each sub-step runs in its own `try/except`. A failure in news enrichment does not block watchlist population. The pipeline's top-level `success` is True unless the pipeline itself crashes.
+- **Trusted dates**: yfinance is the primary date source; Finnhub supplies BMO/AMC timing and fallback dates. Dates that have been verified are locked with `date_confirmed = 1` and are never overwritten automatically.
+- **No fake data**: Every metric is measured from actual database state. If a calculation can't be performed, the column is NULL — never estimated.
 
 ---
 
 ## 2. Data Sources & External APIs
 
-### Finnhub (Primary Earnings Calendar)
-- **Endpoint:** `GET https://finnhub.io/api/v1/calendar/earnings`
-- **Rate limit:** 60 requests/minute (free tier)
-- **Usage:** 3-4 API calls per Friday refresh (date-range scan, 30-day chunks, 90 days ahead)
-- **Provides:** `earnings_date`, `earnings_time` (bmo/amc/dmh), `eps_estimate`, `revenue_estimate`
-- **Config:** `config.json` → `finnhub` section
-- **Client:** `core/finnhub_api.py` — `FinnhubAPI` (low-level HTTP + rate limiter) + `FinnhubEarningsClient` (high-level wrapper with chunked fetching)
+### yfinance (Primary Date Source + Estimates)
+- **Usage:** Per-symbol `Ticker(symbol).calendar` calls, wrapped in a 5-second thread-pool timeout (yfinance uses `curl_cffi`, so the HTTP timeout can't be set directly). Stdout/stderr are suppressed during the call.
+- **Provides:** next `earnings_date`, `eps_estimate` ("Earnings Average"), `revenue_estimate` ("Revenue Average").
+- **Stale guard:** A returned date in the past is treated as "no data" (yfinance returns last quarter's date for symbols whose next report is far out).
+- **Why primary:** On date conflicts, yfinance has proven more reliable than Finnhub (rewire on 2026-03-05; "yfinance wins" rule 2026-03-23).
 
-### YFinance (Fallback Calendar)
-- **Usage:** Per-symbol calls for KLMN 800 symbols not returned by Finnhub
-- **Provides:** `earnings_date` (timing data is unreliable — returns analyst call times, not results release)
-- **Typical coverage gap:** ~440 symbols fall through to YFinance after Finnhub's 280-290 symbol results
+### Finnhub (Timing + Fallback Dates)
+- **Endpoint:** `GET /calendar/earnings` (per-symbol, 90 days ahead)
+- **Rate limit:** 60 requests/minute (free tier), enforced by the client's rate limiter.
+- **Provides:** `hour` → `earnings_time` (bmo/amc/dmh), fallback `date`, `epsEstimate`, `revenueEstimate`.
+- **Used for dates only** when a symbol is new to `earnings_upcoming` and yfinance has no date.
+- **Config:** `config.json` → `finnhub` section. **Client:** `core/finnhub_api.py` (`FinnhubAPI`).
 
 ### Tradier (Options & IV Data — via Option Pipeline)
-- **Not called directly by EI.** EI reads from `option_symbol_summary`, which is populated by the Option Pipeline strategy using the Tradier API.
-- **Data consumed:** `front_month_iv`, `iv_30dte`, `iv_45dte`, `total_call_oi`, `total_put_oi`, daily close prices via `historical_prices`
+- **Not called directly by EI.** EI reads `option_symbol_summary` and `option_contracts`, which the Option Pipeline populates from Tradier.
+- **Data consumed:** `iv_front_month`, `iv_30dte`, `iv_45dte`, `total_call_oi`, `total_put_oi`, `total_open_interest`, `symbol_iv_percentile_30d`, `oi_balance_text`, `volume_put_call_ratio`, ATM call/put `last_price` from `option_contracts`, and closes/OHLC from `historical_prices`.
 
 ### Alpha Vantage (News Sentiment)
-- **Endpoint:** News sentiment API
-- **Rate limit:** 25 calls/day (single API key)
-- **Usage:** Enriches watchlist entries with relevance-weighted sentiment scores
-- **Budget exhaustion is not an error** — the pipeline continues; unenriched symbols retain NULL sentiment columns
+- **Rate limit:** 25 calls/day (single API key, shared with Flow Monitor).
+- **Usage:** Enriches new and T-1 watchlist entries with relevance-weighted sentiment.
+- **Budget exhaustion is not an error** — the pipeline continues; unenriched symbols may still pick up sentiment from articles Flow Monitor already collected (Section 6, news backfill).
 
 ---
 
 ## 3. Pipeline Architecture
 
-EI has two operational modes, both orchestrated by `ei_main.py`:
+EI runs in two modes. The daily pipeline lives in `ei_main.py`; the weekly refresh is a separate class in `ei_collector.py` called directly by the orchestrator.
 
-### Daily Pipeline (`run_daily_pipeline()`)
-Runs as **Step 1.2** in the morning orchestrator (before market open). Six sub-steps execute sequentially:
+### Daily Pipeline (`ei_main.run_daily_pipeline()`)
+
+Runs as **Step 1.2** of the morning orchestrator (before market open).
 
 | # | Sub-step | Function | What It Does |
 |---|----------|----------|--------------|
-| 1 | Snapshot Collection | `SnapshotCollector.collect_daily_snapshots()` | Captures IV, price, OI, and put/call ratio for stocks within T-7 to T+3 of their earnings date. Writes to `earnings_snapshots`. |
-| 2 | Post-Earnings Calculation | `PostEarningsCalculator.calculate_post_earnings_metrics()` | For stocks that reported earnings yesterday/recently: calculates price moves (1-day through 5-day), IV crush metrics, and move-vs-expected. Writes to `earnings_moves`. |
-| 3 | Expected Moves Update | `update_expected_moves()` | Recalculates `expected_move_pct`, `straddle_expected_move_pct`, `historical_avg_move_pct`, `relative_underpricing_pct`, and `earnings_play_signal` for all upcoming earnings. Updates `earnings_upcoming`. |
-| 4 | Watchlist Population | `populate_watchlist()` | Filters `earnings_upcoming` to stocks meeting signal + liquidity criteria. Writes/updates `earnings_watchlist`. Manages the UPCOMING→TODAY→T+3→deleted lifecycle. |
-| 5 | News Enrichment | Inline (no separate module) | Fetches Alpha Vantage news sentiment for new watchlist entries and T-1 symbols. Updates `news_sentiment_score`, `news_sentiment_label`, `news_article_count` on `earnings_watchlist`. |
-| 6 | Arbitrage Scan | `ArbitrageScanner.scan_morning_opportunities()` | Finds sector sympathy plays — peers with cheap IV relative to today's earnings reporters. Writes to `earnings_sector_effects`. |
+| 1 | Lite Earnings Refresh | `ei_lite_refresh.run_lite_refresh()` | Re-checks dates/timing for **unconfirmed** symbols reporting within 21 days, flags disputes, and may spawn the Earnings Researcher agent. See Section 4. |
+| 2 | Snapshot Collection | `SnapshotCollector.collect_daily_snapshots()` | Captures the previous trading day's OHLC, IV, OI, volume, and current straddle expected move for symbols in the T-7…T+5 window, plus up to 4 industry peers. Writes `earnings_snapshots`. |
+| 3 | Archive Past Earnings | inline SQL in `ei_main.py` | `INSERT OR IGNORE` past-dated `earnings_upcoming` rows into `earnings_events`, carrying the signal columns. Runs **daily** (since 2026-04-22) so post-earnings calc can find events promptly. |
+| 3.5 | event_id Backfill | inline SQL in `ei_main.py` | Sets `earnings_snapshots.event_id` where NULL by matching `earnings_events` on symbol and earnings date ±3 days (SA Proposal 029). Idempotent. |
+| 4 | Post-Earnings Calculation | `PostEarningsCalculator.calculate_post_earnings_metrics()` | For events 3–10 days past: price moves, peaks/swings, IV crush, move-vs-expected. Writes `earnings_moves`, `earnings_sector_effects`, and outcome columns on `earnings_events`. Then refreshes derived columns for touched symbols. See Section 9. |
+| 5 | Expected Moves Update | `ei_moves_upcoming.update_expected_moves()` | For every `earnings_upcoming` row dated today or later: recalculates straddle expected move, recent-6Q historical average, relative underpricing, signal, and alert flag. |
+| 6 | Watchlist Population | `ei_watchlist.populate_watchlist()` | Cleans up expired rows, upserts qualifying + existing symbols, enriches with flow-alert counts and existing news sentiment. |
+| 7 | News Enrichment | inline in `ei_main.py` | Alpha Vantage sentiment for watchlist symbols that are new today or at T-1, skipping symbols already fetched today. |
+| 8 | Arbitrage Scan | *disabled* | The `ArbitrageScanner` call is commented out in `ei_main.py`; the sub-step logs "in development" and reports success with `skipped=True`. The standalone `--morning-scan` mode still runs the scanner. |
 
-**Failure cascading:** Sub-step 5 depends on sub-step 4 (needs watchlist entries to enrich). All other sub-steps are independent. The top-level `success` field is True if the pipeline completed without crashing; individual sub-step failures are logged but don't halt the pipeline.
+**Dependencies:** Sub-step 7 needs sub-step 6 (it enriches watchlist rows). Sub-step 4 depends on sub-step 3 having archived the event. Sub-step 5 must run before 6 for the watchlist to see fresh signals. Otherwise the steps are independent, and a failure in one does not stop the others.
 
-### Weekly Refresh (`run_weekly_refresh()`)
-Runs as **Step 5.2** on Fridays. Three tasks:
+**Ordering detail:** Snapshots (2) run before the archive (3), so pre-earnings snapshot rows are written with a NULL `event_id`; the 3.5 backfill fills them once the event lands in `earnings_events`.
 
-1. **Fetch upcoming earnings** — Finnhub bulk fetch (primary) + YFinance fallback. Populates `earnings_upcoming` with ON CONFLICT upsert that preserves analysis columns.
-2. **Archive past earnings** — Moves expired entries from `earnings_upcoming` to `earnings_events`, preserving 7 signal/estimate columns.
-3. **Cleanup** — Deletes entries from `earnings_upcoming` older than 7 days past their earnings date.
+### Weekly Refresh (`ei_collector.EarningsCollector.collect_weekly_earnings()`)
+
+Runs as **Step 5.3** on Fridays via `main_runners.run_earnings_weekly_refresh()`. Three steps:
+
+1. **Archive past earnings** → `earnings_events` (same SQL as daily sub-step 3; normally a no-op now that the daily pipeline archives).
+2. **Cleanup** — deletes `earnings_upcoming` rows more than 7 days past their earnings date.
+3. **Fetch + upsert** — for every non-ETF symbol in the KLMN universe (DB-backed list via `get_specialty_list('klmn_800')`):
+   - **Confirmed rows (`date_confirmed = 1`) are skipped** — never written. Instead, yfinance is probed and any divergence from the stored date on a future event is logged to `performance.db.earnings_date_disputes` with `dispute_reason = 'confirmed_row_diverged'` (SA Proposal 021, passive drift detection).
+   - **Existing unconfirmed rows:** if yfinance returns a valid future date that differs from the stored date, the stored date is **updated** (`yfinance_updated`). If yfinance has no date or agrees, the stored date is preserved; a Finnhub-only disagreement is logged but not acted on.
+   - **New symbols:** yfinance date if present, else Finnhub date.
+   - Estimates prefer yfinance, falling back to Finnhub. `earnings_time` comes from Finnhub.
+   - Upsert: `ON CONFLICT(symbol) DO UPDATE` sets `earnings_date`; `earnings_time` uses `COALESCE(NULLIF(excluded, 'Unknown'), existing)` so known timing is never downgraded to "Unknown"; estimates use `COALESCE` to keep prior values.
+   - Every symbol's source comparison is written to `performance.db.earnings_date_sources`.
+
+> The orchestrator's mission box for this step still says "Finnhub per-symbol" for step 3. The code is yfinance-primary as described above.
 
 ### Return Dict Contract
-Both modes return structured dicts (not bools) consumed by the orchestrator for console output and performance tracking. Key fields:
-- `success` (bool), `duration_seconds` (float), `errors` (int)
-- `sub_tasks` (dict of per-step results with individual `success`, `duration`, and metrics)
-- Mode-specific: `snapshots_created`, `moves_calculated`, `alerts_triggered`, `watchlist_count`, `watchlist_new`, `news_enriched`, `arb_opportunities` (daily) or `earnings_found`, `events_archived`, `records_cleaned` (weekly)
+
+Both modes return structured dicts consumed by the orchestrator and `tools/performance_writer.py`:
+- Common: `success`, `duration_seconds`, `errors`, `sub_tasks` (per-step `success`, `duration_seconds`, and metrics).
+- Daily top-level: `snapshots_created`, `moves_calculated`, `alerts_triggered`, `alert_details`, `watchlist_count`, `watchlist_new`, `watchlist_symbols`, `watchlist_breakdown`, `signals_updated`, `news_enriched`, `arb_opportunities`.
+- Daily `sub_tasks` keys: `lite_refresh`, `snapshots`, `archive`, `calculations`, `expected_moves`, `watchlist`, `news_enrichment`, `arbitrage`.
+- Weekly: `earnings_found`, `events_archived`, `records_cleaned`, `upcoming_count`, `no_data_count`, `timing_breakdown`, `date_source_counts`; `sub_tasks` keys `archive`, `cleanup`, `fetch`.
 
 ---
 
-## 4. Signal Classification System
+## 4. Earnings Date Confirmation
+
+Getting the date right matters more than anything else: a signal on the wrong date is worthless. Since April 2026, dates have three layers of protection.
+
+### Confirmation columns (`earnings_upcoming`)
+- `date_confirmed` (INTEGER, default 0), `date_confirmed_by` (`ben` / `agent`), `date_confirmed_at`.
+- Added idempotently by `ei_lite_refresh._ensure_confirmation_schema()`.
+- Written **only** by `tools/earnings_confirm.py` (used by Ben and by the Earnings Researcher agent). Safety rules in that tool: `--date` and `--by` are required; a row confirmed by `ben` can only be modified with `--by ben`.
+- As of 2026-10-14: 159 confirmed rows, all `confirmed_by = agent`.
+
+### Lite refresh (daily sub-step 1)
+For each **unconfirmed** row dated today through today+21:
+1. Fetch yfinance date and Finnhub date/timing.
+2. If yfinance differs from the stored date → update `earnings_date` (guarded by `date_confirmed = 0`).
+3. If Finnhub has timing and the stored timing is `Unknown` → update `earnings_time`.
+4. For **future** events only, flag a dispute:
+   - `unknown_time` — effective timing still Unknown.
+   - `date_disagreement` — yfinance and Finnhub differ by 2–45 days (a gap over 45 days is treated as Finnhub showing next quarter, not a disagreement), **or** yfinance moved the stored date by more than 3 days.
+   - `both` — unknown timing *and* a yfinance/Finnhub disagreement.
+5. Disputes are written to `performance.db.earnings_date_disputes` (`resolution = 'unresolved'`).
+
+### Earnings Researcher spawn
+After the loop, the lite refresh spawns the Earnings Researcher agent (fire-and-forget, visible console window via a temp `.bat`) when **either** there are disputes **or** any unconfirmed row is due within `SPAWN_HORIZON_DAYS = 14`. The second condition was added 2026-09-24 so that zero-dispute mornings no longer skip the agent's backlog. Spawning is skipped if the agent is disabled in `config.json` (`tools/agent_toggle.is_agent_enabled`) or not installed. The agent workspace is private; see `agents/README.md`.
+
+### Dispute table (`performance.db.earnings_date_disputes`)
+- **PK:** `(trade_date, symbol)`. Canonical DDL lives in `performance_writer.ensure_schema()`, which both writers call first so the table self-heals after a DB rebuild.
+- `dispute_reason`: `date_disagreement`, `unknown_time`, `both`, `confirmed_row_diverged`.
+- `resolution`: `unresolved`, `confirmed_ben`, `confirmed_agent`, `skipped`; plus `resolved_date`, `resolved_time`, `resolved_at`, `research_url`, `notes`.
+
+---
+
+## 5. Signal Classification System
 
 ### The Core Metric: Relative Underpricing
 
-The primary signal metric is **`relative_underpricing_pct`**, which answers: *"By what percentage is the market underpricing this stock's typical earnings move?"*
-
-**Formula:**
 ```
 relative_underpricing_pct = (historical_avg_move_pct - straddle_expected_move_pct) / straddle_expected_move_pct * 100
 ```
 
-If straddle data is unavailable, the IV-based `expected_move_pct` is used as the denominator instead. If neither is available, the signal is `UNKNOWN`.
+- **`historical_avg_move_pct`** is the average absolute 1-day move over the symbol's **most recent 6 quarters** in `earnings_moves` (since 2026-04-13; configurable via `earnings_play.recent_quarters`). The all-time average is stored alongside as `historical_avg_move_alltime_pct`, with `historical_quarters_used` recording how many quarters went into the recent average. If fewer than 6 exist, all available quarters are used.
+- **`straddle_expected_move_pct`** is the only denominator. The IV-based fallback and the `expected_move_pct` column were removed from `earnings_upcoming`, `earnings_events`, and `earnings_watchlist` on 2026-04-26 (SA Proposal 017). The fallback had produced false STRONG BUYs when front-month IV came from an expiration *before* earnings. If the straddle can't be computed, the signal is `UNKNOWN`.
+- `move_difference_pct` (absolute difference) is still computed and stored for backward compatibility but does not drive signals.
 
-**Why relative, not absolute:** A 3% absolute difference on a 10% expected move (30% relative underpricing) is far more interesting than a 3% difference on a 50% expected move (6% relative). The absolute metric (`move_difference_pct`) is still calculated and stored for backward compatibility, but it does not drive signals.
+### Straddle Expected Move
 
-**Coverage note:** Within 0-30 days of earnings, 96-100% of symbols have at least one expected move method populated. Beyond 30 days, ~48% lack data — these receive `UNKNOWN` signals, which is correct (insufficient data to form a recommendation).
+`ei_moves_upcoming.get_straddle_expected_move()`:
+1. Latest close from `historical_prices`.
+2. First expiration on or after the earnings date in `option_contracts` (latest `trade_date`).
+3. ATM strike = strike closest to the close; needs both CALL and PUT with `last_price > 0`.
+4. `(call + put) × 0.85 / close × 100`.
+
+The **0.85 multiplier** is an industry-standard haircut for spread and execution cost, so the comparison is against the *tradeable* expected move. This makes relative underpricing slightly higher than it would be against the raw straddle, which is intentional.
+
+On the UPDATE, `straddle_expected_move_pct = COALESCE(new, existing)`: if today's straddle can't be built (thin chain), the last good value is kept.
+
+**Coverage:** The Option Pipeline collects contracts about 2 months out, so symbols with distant earnings have no post-earnings expiration yet and stay `UNKNOWN`. Coverage is good inside the 14-day watchlist window.
+
+### Scope
+
+Only rows with `earnings_date >= today` are recalculated. Past-due rows are left for archiving and never recalculated, because near-expiry straddles produce absurd underpricing values.
 
 ### Signal Tiers
 
-Calculated in `ei_moves_upcoming.py:determine_earnings_play_signal()` (line 333):
+`ei_moves_upcoming.determine_earnings_play_signal()`:
 
 | Signal | Relative Underpricing | Meaning |
 |--------|----------------------|---------|
-| **AVOID** | < 0% | Market *overprices* the typical move. Options are expensive relative to history. |
+| **AVOID** | < 0% | Market prices a bigger move than the recent history. |
 | **NEUTRAL** | 0% to < 15% | Slight underpricing, not enough to act on. |
-| **WATCH** | 15% to < 30% | Meaningful underpricing. Worth monitoring. |
-| **BUY** | 30% to < 50% | Significant underpricing. Actionable opportunity. |
-| **STRONG BUY** | >= 50% | Market is substantially underpricing this stock's earnings move. |
-| **UNKNOWN** | N/A (missing data) | Insufficient IV/price data to compute a signal. |
+| **WATCH** | 15% to < 30% | Meaningful underpricing. |
+| **BUY** | 30% to < 50% | Significant underpricing. |
+| **STRONG BUY** | ≥ 50% | Substantial underpricing. |
+| **UNKNOWN** | N/A | No straddle or no history. |
 
-Thresholds are configurable in `config.json` under `earnings_play.signal_thresholds` (keys: `watch`, `buy`, `strong_buy`).
-
-**Provisional status:** These thresholds were set based on distribution analysis of the KLMN 800 universe on 2026-02-10. They have not yet been validated against outcomes. Calibration requires ~100 events with `move_vs_expected_pct` data to determine whether WATCH/BUY/STRONG BUY signals correlate with profitable trades. Expected: early March 2026.
+Thresholds: `config.json` → `earnings_play.signal_thresholds` (`watch` 15, `buy` 30, `strong_buy` 50 — unchanged since 2026-02-10).
 
 ### Alert Gate
 
-An earnings alert fires (logging + potential email notification) when *both* conditions are met:
-- `relative_underpricing_pct >= 15%` (aligned with WATCH threshold)
-- `total_open_interest >= 4,000` (liquidity gate — sum of call + put OI from `option_symbol_summary`)
+`ei_moves_upcoming.should_trigger_earnings_alert()` sets `earnings_upcoming.earnings_alert = 1` when:
+- `relative_underpricing_pct >= earnings_play.alert_underpricing_threshold` (15), **and**
+- `total_open_interest >= earnings_play.min_open_interest` (4,000), read from `option_symbol_summary.total_open_interest` on the latest trade date.
 
-This is computed in `ei_moves_upcoming.py:should_trigger_earnings_alert()` (line 370).
-
-### The 0.85 Slippage Multiplier
-
-The `straddle_expected_move_pct` includes an industry-standard **0.85 multiplier** applied to the raw at-the-money straddle price. This accounts for bid-ask spread slippage and execution costs — the *tradeable* expected move is lower than the theoretical straddle price. This makes relative underpricing values slightly higher than they would be using raw straddle prices, which is intentional: we are comparing historical moves against what a trader would actually pay.
-
----
-
-## 5. Tables & Data Lifecycle
-
-### Data Flow
-
-```
-Finnhub/YFinance ──→ earnings_upcoming ──→ earnings_watchlist (investor-facing)
-                           │                       │
-                           │                       ├── news_symbol_sentiment (Alpha Vantage)
-                           │                       │
-                     (Friday archive)         (T+4 cleanup)
-                           │
-                           ▼
-                     earnings_events ──→ sector archives (Tier 3, 90-day COPY)
-                           │
-                           ▼
-                     earnings_moves (post-earnings metrics)
-                           │
-                     earnings_snapshots (IV/price time series)
-                           │
-                     earnings_sector_effects (sympathy plays)
-```
-
-### Table Reference
-
-**`earnings_upcoming`** — The universe of upcoming earnings events.
-- **PK:** `symbol` (one entry per stock)
-- **Written by:** `ei_fetch_upcoming.py` (weekly), `ei_moves_upcoming.py` (daily expected moves update)
-- **Read by:** `ei_watchlist.py`, `ei_snapshot_collector.py`, `ei_post_earnings_calc.py`, `ei_arbitrage_scanner.py`
-- **Key columns:** `earnings_date`, `earnings_time` (bmo/amc/dmh/Unknown), `expected_move_pct`, `straddle_expected_move_pct`, `historical_avg_move_pct`, `relative_underpricing_pct`, `earnings_play_signal`, `move_difference_pct`, `earnings_alert`, `eps_estimate`, `revenue_estimate`
-- **Upsert pattern:** `ON CONFLICT(symbol) DO UPDATE` preserving analysis columns. `earnings_time` uses `COALESCE(NULLIF(excluded, 'Unknown'), existing)` so Finnhub timing is never overwritten by YFinance's "Unknown."
-
-**`earnings_watchlist`** — The action list: filtered, enriched, investor-facing. 24 columns.
-- **PK:** `symbol` (one entry per stock)
-- **Written by:** `ei_watchlist.py:populate_watchlist()` (daily)
-- **Read by:** Orchestrator (console display), Morning View TUI
-- **Entry criteria:** Signal in (WATCH, BUY, STRONG BUY) AND earnings within 14 calendar days AND total OI >= 4,000
-- **Lifecycle:** See Section 6
-
-**`earnings_events`** — The archive: every earnings event after it passes.
-- **PK:** `event_id` (auto-increment)
-- **Written by:** `ei_main.py:run_weekly_refresh()` (Friday archive query)
-- **Archived to:** Sector databases via Tier 3 (90-day COPY)
-- **Signal preservation (added Feb 2026):** 7 columns copied from `earnings_upcoming` during archive: `earnings_play_signal`, `relative_underpricing_pct`, `expected_move_pct`, `straddle_expected_move_pct`, `historical_avg_move_pct`, `eps_estimate`, `revenue_estimate`
-
-**`earnings_moves`** — Post-earnings price moves, IV changes, and move-vs-expected analysis.
-- **PK:** `move_id` (auto-increment), unique on `(event_id, symbol)`
-- **Written by:** `ei_post_earnings_calc.py:PostEarningsCalculator`
-- **9,324 rows** as of Feb 2026 (all with price moves after the Phase 3 backfill)
-- **Key columns:** `move_1day_pct` through `move_5day_pct`, `move_direction`, `max_intraday_move_pct`, `move_vs_expected_pct`, `iv_buildup_pct`, `iv_collapse_pct`, `iv_crush_severity`, `expected_move_pct`, `earnings_date` (denormalized)
-- **Not archived** — stays in production indefinitely (backtest reference data)
-
-**`earnings_snapshots`** — IV/price time series captured T-7 through T+3 around each earnings event.
-- **Unique on:** `(symbol, earnings_date, snapshot_date)`
-- **Written by:** `ei_snapshot_collector.py:SnapshotCollector`
-- **Status:** Table redesigned Feb 2025. Collector fixed Feb 25, 2026. Data accumulating since then. Will become the primary source for post-earnings calculations once ~2 weeks of data exists (~March 11).
-- **Schema:** `snapshot_id`, `symbol`, `earnings_date`, `event_id` (nullable), `snapshot_date`, `days_from_earnings`, `snapshot_type` (pre_earnings/earnings_day/post_earnings), `close_price`, `volume`, `iv_30dte`, `iv_front_month`, `iv_45dte`, `total_open_interest`, `put_call_ratio`, `is_primary_symbol`
-
-**`earnings_sector_effects`** — Sector sympathy and arbitrage opportunities.
-- **Written by:** `ei_arbitrage_scanner.py:ArbitrageScanner` and `ei_post_earnings_calc.py` sector effects calculation
-- **Status:** Functionally a no-op until the arbitrage scanner finds same-day earnings reporters with populated peer mappings. The infrastructure is in place; meaningful data will accumulate as the watchlist matures.
-
-**`news_symbol_sentiment`** — Per-symbol news sentiment from Alpha Vantage.
-- **Written by:** `tools/news_sentiment.py` (called inline during sub-step 5)
-- **Dedup key:** Checked by `(symbol, DATE(time_collected))` — one fetch per symbol per day
+Alerts are counted and listed (top 5 by underpricing) in the orchestrator's completion box, and the flag is read by Morning View (`morning_view/tui_data.py`, `morning_views.py`). EI itself sends no email for them.
 
 ---
 
 ## 6. The Earnings Watchlist
 
-### Schema (24 columns)
+### Schema (21 columns)
+
+Created by `ei_watchlist._create_table()`:
 
 ```sql
 CREATE TABLE earnings_watchlist (
-    symbol TEXT PRIMARY KEY,          -- Stock ticker
-    status TEXT NOT NULL,             -- UPCOMING, TODAY, T+1, T+2, T+3
-    current_price REAL,               -- Latest price from historical_prices
-    days_to_earnings INTEGER NOT NULL,-- Positive = future, 0 = today, negative = past
-    earnings_date TEXT NOT NULL,       -- YYYY-MM-DD
-    earnings_time TEXT,               -- bmo, amc, dmh, Unknown
-    earnings_play_signal TEXT,        -- AVOID, NEUTRAL, WATCH, BUY, STRONG BUY, UNKNOWN
-    iv_percentile_30d REAL,           -- Current IV vs 30-day range
-    relative_underpricing_pct REAL,   -- The signal metric
-    expected_move_pct REAL,           -- Market-implied expected move
-    historical_avg_move_pct REAL,     -- What the stock actually does historically
-    straddle_expected_move_pct REAL,  -- ATM straddle-derived expected move (with 0.85 multiplier)
-    oi_balance_text TEXT,             -- "Call-heavy", "Put-heavy", "Balanced"
-    alert_count_5d INTEGER,           -- Flow alerts in last 5 days (cross-strategy)
-    news_sentiment_label TEXT,        -- Bearish, Somewhat-Bearish, Neutral, Somewhat-Bullish, Bullish
-    news_sentiment_score REAL,        -- Relevance-weighted sentiment (-1 to +1)
-    news_article_count INTEGER,       -- Number of recent articles analyzed
-    actual_move_pct REAL,             -- Populated at T+3 from earnings_moves.move_3day_pct
-    move_direction TEXT,              -- "up" or "down" (T+3 enrichment)
-    iv_collapse_pct REAL,             -- Post-earnings IV drop (T+3 enrichment)
-    iv_crush_severity TEXT,           -- severe/high/normal/mild/minimal (T+3 enrichment)
-    first_appeared_date TEXT NOT NULL, -- When the symbol first entered the watchlist
-    created_at TEXT NOT NULL,         -- Row creation timestamp
-    last_updated TEXT NOT NULL        -- Last modification timestamp
+    symbol TEXT PRIMARY KEY,
+    status TEXT NOT NULL,              -- UPCOMING, TODAY, T+1, T+2, T+3
+    current_price REAL,                -- option_symbol_summary.close_price (latest trade_date)
+    days_to_earnings INTEGER NOT NULL, -- positive = future, 0 = today, negative = past
+    earnings_date TEXT NOT NULL,
+    earnings_time TEXT,                -- bmo, amc, dmh, Unknown
+    earnings_play_signal TEXT,
+    iv_percentile_30d REAL,            -- symbol_iv_percentile_30d (falls back to prior day if NULL)
+    relative_underpricing_pct REAL,
+    historical_avg_move_pct REAL,      -- recent-6Q average
+    straddle_expected_move_pct REAL,
+    oi_balance_text TEXT,              -- from option_symbol_summary
+    vol_balance_text TEXT,             -- derived from volume_put_call_ratio (see below)
+    iv_front_month_change_5d REAL,     -- % change in iv_front_month vs 5 trading days ago (IV ramp)
+    alert_count_5d INTEGER,            -- flow_symbol_summary.alert_count_5d
+    news_sentiment_label TEXT,
+    news_sentiment_score REAL,         -- relevance-weighted, -1 to +1
+    news_article_count INTEGER,
+    first_appeared_date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_updated TEXT NOT NULL
 )
 ```
 
+Changes since February 2026: `expected_move_pct` dropped (SA P017). The T+3 outcome columns (`actual_move_pct`, `move_direction`, `iv_collapse_pct`, `iv_crush_severity`) were removed in the 2026-04-14 audit; outcomes now live on `earnings_events` (Section 9). `vol_balance_text` and `iv_front_month_change_5d` were added 2026-04-14.
+
+**`vol_balance_text`** thresholds on `volume_put_call_ratio`: < 0.5 "Clear Call Vol", < 0.77 "Heavy Call Vol", ≤ 1.3 "Balanced Vol", ≤ 1.9 "Heavy Put Vol", else "Clear Put Vol". Because the morning OP run writes today's summary row before there is any volume, a NULL ratio falls back to the previous trading day.
+
 ### Entry Criteria
 
-A stock enters the watchlist when ALL of:
+A new symbol enters when ALL of:
 1. `earnings_play_signal` IN ('WATCH', 'BUY', 'STRONG BUY')
-2. `earnings_date` is within 14 calendar days
-3. `total_call_oi + total_put_oi >= 4,000` (from `option_symbol_summary`)
+2. `earnings_date` between today and today+14 (calendar days)
+3. `total_call_oi + total_put_oi >= 4,000` on the latest `option_symbol_summary` trade date
 
-### Status Lifecycle
+Once on the list, a symbol is refreshed daily **regardless of signal** — a downgrade updates the column but does not remove the row. If its `earnings_upcoming` row is gone (archived), the stored `earnings_date` is kept and the signal columns go NULL.
+
+### Status Lifecycle & Cleanup
 
 ```
-UPCOMING ──→ TODAY ──→ T+1 ──→ T+2 ──→ T+3 ──→ (deleted)
-                                          │
-                                    T+3 enrichment:
-                                    actual_move_pct,
-                                    move_direction,
-                                    iv_collapse_pct,
-                                    iv_crush_severity
+UPCOMING ──→ TODAY ──→ T+1 ──→ T+2 ──→ T+3 ──→ (deleted at T+4)
 ```
 
-- **UPCOMING:** `days_to_earnings > 0`. Stock hasn't reported yet.
-- **TODAY:** `days_to_earnings = 0`. Earnings day.
-- **T+1, T+2, T+3:** 1-3 days after earnings. Allows monitoring of the post-earnings move.
-- **At T+3:** The watchlist entry is enriched with actual outcomes from `earnings_moves` (price move, direction, IV crush). This is the "was the signal right?" data point.
-- **At T+4:** Row is deleted. The data lives on in `earnings_events` and `earnings_moves`.
+`_cleanup_expired()` runs first each day and deletes rows that are **4+ days past** earnings **or more than 14 days out**. The second rule catches symbols whose date was pushed back beyond the window.
 
-### Upsert Pattern
+### Upsert & Enrichment Ownership
 
-`populate_watchlist()` uses `INSERT ... ON CONFLICT(symbol) DO UPDATE SET ...` with the following ownership rules:
-- **INSERT** owns: all 24 columns (NULLs for post-earnings columns on first insert)
-- **UPDATE** owns: `status`, `current_price`, `days_to_earnings`, and all pre-earnings analytical columns
-- **T+3 enrichment UPDATE** owns: `actual_move_pct`, `move_direction`, `iv_collapse_pct`, `iv_crush_severity`
-- **News enrichment UPDATE** owns: `news_sentiment_score`, `news_sentiment_label`, `news_article_count`
-- **`first_appeared_date`** is set *after* `clean_database_row()` runs (because the formatter nullifies date-looking strings). Never overwritten on UPDATE.
+- **INSERT** writes all 21 columns (enrichment columns NULL).
+- **ON CONFLICT UPDATE** refreshes status, price, dates, timing, signal and analytics columns. `iv_percentile_30d` uses `COALESCE` to keep the prior value. It deliberately **does not** touch `alert_count_5d` or the three `news_*` columns, so yesterday's enrichment survives until overwritten.
+- `first_appeared_date` / `created_at` are set *after* `clean_database_row()` (the formatter nullifies date-like strings) and are never updated on conflict.
+- **Flow enrichment** — `alert_count_5d` from `flow_symbol_summary` (latest trade date).
+- **News backfill** — for rows with NULL `news_sentiment_score`, aggregates the last 3 days of `news_symbol_sentiment` (often collected by Flow Monitor). Uses the same relevance weighting as `tools/news_sentiment.py`, and the label is a distribution like `Bull 3/Neutral 1`.
+- **News enrichment (sub-step 7)** — fresh Alpha Vantage fetch for new and T-1 symbols, overwriting the three news columns.
+
+As of 2026-10-14: 19 rows.
 
 ---
 
 ## 7. IV Crush Severity Scale
 
-Post-earnings IV typically drops as the uncertainty that justified the elevated premium resolves. The system classifies the magnitude of this drop on a 5-tier scale.
+`iv_collapse_pct = (post_iv - pre_iv) / pre_iv * 100` (negative when IV drops). Classification uses the absolute value:
 
-**Measurement:** `iv_collapse_pct = (post_iv - pre_iv) / pre_iv * 100` — this is a negative number (IV drops). The classification uses the absolute value.
-
-| Tier | |IV Collapse| | Interpretation |
+| Tier | \|IV Collapse\| | Interpretation |
 |------|-------------|----------------|
-| **severe** | > 65% | Exceptionally large IV crush. Common in high-IV names (biotech, meme stocks). |
-| **high** | 50% - 65% | Above-average crush. Expected for volatile earnings reporters. |
-| **normal** | 40% - 50% | Typical post-earnings crush. ~45% is the observed center. |
-| **mild** | 25% - 40% | Below-average crush. May indicate lingering uncertainty. |
-| **minimal** | < 25% | Very little IV reduction. Could signal an ongoing catalyst beyond earnings. |
+| **severe** | > 65% | Exceptionally large crush. |
+| **high** | 50% – 65% | Above-average crush. |
+| **normal** | 40% – 50% | Typical; ~45% is the observed center. |
+| **mild** | 25% – 40% | Below-average; lingering uncertainty. |
+| **minimal** | < 25% | Little reduction; possible ongoing catalyst. |
 
-**Code location:** `ei_post_earnings_calc.py`, lines 529-541 (option_summary path) and lines 441-452 (snapshots path — identical thresholds).
-
-**IV source hierarchy:**
-1. `earnings_snapshots` — T-1 and T+1 IV from the snapshot time series (primary, once data accumulates)
-2. `option_symbol_summary` — `front_month_iv` on the day before and day after earnings (fallback, currently the active path)
-
-**Provisional status:** The 5-tier scale was set based on observed distributions (Feb 2026). The ~45% center for "normal" aligns with industry literature on post-earnings IV behavior. Will be refined as more data accumulates.
+The same thresholds are applied in both IV paths in `ei_post_earnings_calc.py` (`_calculate_iv_changes` and `_get_iv_from_option_summary`). The scale is provisional (set Feb 2026 from observed distributions).
 
 ---
 
-## 8. Orchestration & Scheduling
+## 8. Tables & Data Lifecycle
 
-### Daily Cycle (Step 1.2)
+### Data Flow
 
-The EI daily pipeline runs as the **second step** in the morning pre-market phase:
+```
+yfinance + Finnhub ──→ earnings_upcoming ──→ earnings_watchlist (action list)
+   (lite daily /         │   ▲                      ▲
+    full Friday)         │   └── tools/earnings_confirm.py (date_confirmed)
+                         │                          ├── flow_symbol_summary
+                         │                          └── news_symbol_sentiment
+                    (daily archive)
+                         ▼
+                   earnings_events ◀── outcome columns ── earnings_moves
+                         │                                   ▲
+                         ▼                                   │
+             sector archives (Tier 3, 90d COPY,     earnings_snapshots (T-7…T+5)
+             production rows retained)                       │
+                                                     earnings_sector_effects
 
+performance.db: ei_pipeline_performance, earnings_date_sources, earnings_date_disputes
+```
+
+### Table Reference
+
+**`earnings_upcoming`** — one row per symbol (`PK symbol`).
+- **Written by:** `ei_collector.py` (weekly), `ei_lite_refresh.py` (daily date/timing), `ei_moves_upcoming.py` (daily analytics), `tools/earnings_confirm.py` (confirmation).
+- **Key columns:** `earnings_date`, `earnings_time`, `earnings_days_ahead`, `straddle_expected_move_pct`, `historical_avg_move_pct`, `historical_avg_move_alltime_pct`, `historical_quarters_used`, `relative_underpricing_pct`, `move_difference_pct`, `earnings_play_signal`, `earnings_alert`, `eps_estimate`, `revenue_estimate`, `date_confirmed`, `date_confirmed_by`, `date_confirmed_at`, `updated_at`.
+- As of 2026-10-14: 777 rows, 766 future-dated, 540 with known bmo/amc/dmh timing.
+
+**`earnings_watchlist`** — Section 6.
+
+**`earnings_events`** — every past event (`PK event_id`, unique on `symbol, earnings_date`).
+- **Written by:** daily archive (sub-step 3) and weekly archive, both `INSERT OR IGNORE`; outcome columns by `PostEarningsCalculator._update_event_outcome()`; derived columns refreshed by `tools/backfill_earnings_events_derived.py`.
+- **Signal snapshot (8 columns, frozen at archive time):** `earnings_play_signal`, `relative_underpricing_pct`, `straddle_expected_move_pct`, `historical_avg_move_pct`, `historical_avg_move_alltime_pct`, `historical_quarters_used`, `eps_estimate`, `revenue_estimate`.
+- **Outcome columns:** `actual_move_1day_pct`, `actual_max_move_pct`, `move_vs_expected_pct`, `iv_collapse_pct`, `move_vs_straddle_pct`, `straddle_outcome`, `move_vs_straddle_max_pct`, `straddle_outcome_max`, `move_vs_historical_pct`, `signal_accuracy`, `outcome_updated_at`.
+- **Archive:** Tier 3 (90-day COPY) to sector databases, but `skip_cleanup` keeps all rows in production because post-earnings calc needs them.
+
+**`earnings_moves`** — post-earnings metrics (`PK move_id`, unique on `event_id, symbol`).
+- **Written by:** `PostEarningsCalculator`. Not archived.
+- **Key columns:** `move_1day_pct`, `move_2day_pct`, `move_3day_pct`, `move_5day_pct`, `move_direction`, `max_intraday_move_pct`, `pre_earnings_close`, pre/post peak up/down pct and day, `pre_earnings_swing_pct`, `post_earnings_swing_pct`, `total_swing_pct`, `iv_buildup_pct`, `iv_collapse_pct`, `iv_recovery_pct`, `iv_crush_severity`, `expected_move_pct`, `expected_move_entry_pct`, `expected_move_final_pct`, `move_vs_expected_pct`, `earnings_date`.
+- `historical_avg_move_pct` (Section 5) is computed from this table, so its quality drives signal quality. As of 2026-10-14: 17,450 rows, earnings dates 2021-01-04 … 2026-10-09.
+
+**`earnings_snapshots`** — daily time series around each event (unique on `symbol, earnings_date, snapshot_date`).
+- **Written by:** `SnapshotCollector`. Data alignment: each morning captures the **previous complete trading day** from `historical_prices` (OHLC, volume) and `option_symbol_summary` (IV, OI, put/call, option volume), plus the current `straddle_expected_move_pct` from `earnings_upcoming`.
+- **Window:** `earnings_upcoming` rows with `days_from_earnings` −7…+5, unioned with `earnings_events` rows 0…+5, so post-earnings capture continues after the upcoming row rolls to next quarter.
+- **Peers:** up to 4 from `industry_peer_mappings` (same industry, leaders first), stored with `is_primary_symbol = 0`.
+- **Columns:** `snapshot_id`, `symbol`, `earnings_date`, `event_id`, `snapshot_date`, `days_from_earnings`, `snapshot_type` (pre_earnings / earnings_day / post_earnings), `open_price`, `high_price`, `low_price`, `close_price`, `volume`, `option_volume`, `iv_30dte`, `iv_front_month`, `iv_45dte`, `total_open_interest`, `put_call_ratio`, `is_primary_symbol`, `straddle_expected_move_pct`, `created_at`.
+- **Join-key policy:** `earnings_date` is captured *as of* `snapshot_date` and can drift across one event's rows as yfinance revises. **Join on `event_id`, not `(symbol, earnings_date)`.** `event_id` is written immediately for post-earnings rows and back-filled for pre-earnings rows by sub-step 3.5.
+- As of 2026-10-14: 44,300 rows since 2026-03-02.
+
+**`earnings_sector_effects`** — peer sympathy metrics. Written by `PostEarningsCalculator._calculate_sector_effects()` for each processed event (160,918 rows as of 2026-10-14). The morning arbitrage scanner that would also write here is disabled (Section 3).
+
+**`news_symbol_sentiment`** — per-symbol news sentiment from Alpha Vantage. `tools/news_sentiment.py`; one fetch per symbol per day.
+
+**performance.db tables:** `ei_pipeline_performance` (Section 11), `earnings_date_sources` (weekly per-symbol source comparison: `stored_date`, `yfinance_date`, `finnhub_date`, `finnhub_timing`, `date_source`, `conflict`), `earnings_date_disputes` (Section 4).
+
+---
+
+## 9. Post-Earnings Analysis
+
+`ei_post_earnings_calc.PostEarningsCalculator`.
+
+### Event selection
+Events in `earnings_events` that are **3–10 calendar days** past their date (as measured against the latest `option_symbol_summary` trade date), and that do not yet have an `earnings_moves` row with a non-NULL `iv_collapse_pct`. Weekend gaps are handled naturally: a Thursday report reaches T+3 on Sunday and is picked up Monday. An event whose IV data is still missing is retried each day until day 10. Older misses need the backfill scripts. `recalculate_all()` (`--recalculate` in the CLI) ignores the existing-row check.
+
+### Price moves — BMO/AMC-aware baseline
+- **Baseline:** AMC → T0 close; BMO or unknown → T-1 close (treating unknown as BMO avoids missing the gap).
+- **Primary source:** `earnings_snapshots` (primary-symbol rows). Computes `move_1/2/3/5day_pct` close-to-close from the baseline, pre-earnings peaks (T-7 to last pre-earnings day), post-earnings peaks (reaction start to T+5), signed swings, `total_swing_pct`, and `max_intraday_move_pct` (largest post-earnings peak by magnitude). Also `expected_move_entry_pct` (earliest snapshot's straddle, ideally T-7) and `expected_move_final_pct` (last pre-earnings snapshot's straddle).
+- **Fallback:** `historical_prices` using on-or-after/on-or-before date lookups. `max_intraday_move_pct` comes from the first post-earnings day's high/low only.
+
+### IV changes
+- **Primary:** `earnings_snapshots.iv_30dte` — buildup (T-7→T-1), collapse (T-1→first post-earnings snapshot), recovery (first→second post-earnings snapshot).
+- **Fallback:** `option_symbol_summary.iv_front_month` — buildup (≤T-5→T-1), collapse (T-1→T+1), recovery (T+1→≥T+3).
+
+### Expected move & move-vs-expected
+`expected_move_pct` on `earnings_moves`, in priority order:
+1. `expected_move_entry_pct` from snapshots (the straddle when the trade thesis existed).
+2. `earnings_upcoming.straddle_expected_move_pct` if the row still has this earnings date.
+3. IV reconstruction: pre-earnings IV × √(1/365) × 100. It looks in `option_symbol_summary` first, then the symbol's sector archive (TA Proposal 003).
+
+`move_vs_expected_pct = |move_1day_pct| / expected_move_pct × 100` (>100 = moved more than priced).
+
+### Outcome write-back to `earnings_events`
+`_update_event_outcome()` writes the outcome columns using the **signal-time** straddle and history stored on the event:
+
+| Metric | Formula | Classification |
+|--------|---------|----------------|
+| `move_vs_straddle_pct` / `straddle_outcome` | \|1-day move\| ÷ straddle × 100 | ≥110 **PROFIT**, ≥95 **FLAT**, else **LOSS** (close-exit trade outcome) |
+| `move_vs_straddle_max_pct` / `straddle_outcome_max` | \|max move\| ÷ straddle × 100 | same tiers (peak-exit outcome, SA P015) |
+| `move_vs_historical_pct` / `signal_accuracy` | \|1-day move\| ÷ historical avg × 100 | ≥100 **CONFIRMED**, ≥80 **CLOSE**, ≥60 **OVER**, else **WAY OFF** |
+
+The two classifiers are pure helpers (`compute_straddle_outcome`, `compute_move_vs_historical`) shared with the backfill tools so thresholds can't drift.
+
+### Derived-column refresh (SA Proposal 016)
+Adding an `earnings_moves` row shifts the recent-6Q baseline for that symbol's other events. At the end of each run, the calculator calls `tools/backfill_earnings_events_derived.run(symbols=touched, apply=True)`. That recomputes `historical_avg_move_pct` and its cascade (`relative_underpricing_pct`, `earnings_play_signal`, `move_vs_historical_pct`, `signal_accuracy`) on `earnings_events`, using `as_of_date` semantics so an event's own move never counts toward its own baseline.
+
+---
+
+## 10. Orchestration & Scheduling
+
+### Daily (Step 1.2)
 ```
 Step 1.1: Morning Option Pipeline
-Step 1.2: Earnings Intelligence ← HERE (6 sub-steps)
-Step 1.3: Symbol Metadata Update
-Step 1.4: Database Sync (pre-market)
-Step 1.5: Morning Views Generation
+Step 1.2: Earnings Intelligence   ← 8 sub-steps (+3.5)
+Step 1.3: Metadata Collection
+Step 1.4: Trade Ingest
+Step 1.5: Query Sync (Morning)
 ```
+Runner: `main_runners.run_earnings_intelligence()` → `ei_main.run_daily_pipeline()`. Phase 1 runs only when the orchestrator starts before 9:00 AM; later starts skip to Flow Monitor.
 
-Orchestrator method: `main_runners.py:run_earnings_intelligence()` (line 1006). This replaced the former `run_earnings_pipeline()` + `run_earnings_morning_scan()` split.
-
-**CLI shortcut:** `python main.py --earnings-intel` starts the daily cycle from this step.
-
-### Friday Cycle (Step 5.2)
-
-The weekly refresh runs on Fridays as part of the weekly operations phase:
-
+### Friday (Step 5.3)
 ```
-Step 5.1: Weekly Database Backup
-Step 5.2: Earnings Weekly Refresh ← HERE (Finnhub + YFinance + archive + cleanup)
-Step 5.3: Sector-Based Archive
+Step 5.1: Database Backup (Weekly) — background thread
+Step 5.2: FM Baseline Update
+Step 5.3: Earnings Calendar Refresh   ← EarningsCollector
+Step 5.4: Sector Archive Operations
+```
+Runner: `main_runners.run_earnings_weekly_refresh()`.
+
+### CLI
+```bash
+python main.py --earnings-intel                                          # orchestrator from Step 1.2
+python strategies/earnings_intel/ei_main.py --daily-pipeline --no-interaction
+python strategies/earnings_intel/ei_main.py --morning-scan               # standalone arbitrage scanner
+python strategies/earnings_intel/ei_moves_upcoming.py --symbol AAPL      # recalc one symbol
+python strategies/earnings_intel/ei_post_earnings_calc.py --recalculate  # force T+3..T+10 recalc
+python tools/earnings_confirm.py --list-unconfirmed                      # unconfirmed within 21d
+python tools/earnings_confirm.py --symbol VZ --date 2026-04-27 --time bmo --by ben
+python tools/backfill_earnings_events_derived.py [--symbols A,B] [--apply]
 ```
 
 ### Console Output
-
-The orchestrator displays a **mission box** before the pipeline starts (listing the 6 sub-steps) and a **completion box** when it finishes (showing key metrics). The strategy layer (`ei_main.py`) owns progress lines (sub-step status, counts) but does not produce boxes or banners — that's the orchestrator's responsibility per the console output architecture.
-
-Completion box example content:
-- Snapshots collected: 12
-- Moves calculated: 3
-- Watchlist: 8 symbols (2 new) (3 STRONG BUY, 2 BUY, 3 WATCH)
-- News enriched: 2 symbols
-- Earnings alerts: 5 (1 STRONG BUY, 2 BUY, 2 WATCH)
+The orchestrator prints a mission box listing the 8 sub-steps and a completion box with: snapshots collected, moves calculated, signals updated, watchlist count/new/breakdown, news enriched (if any), arbitrage opportunities (if any), and earnings alerts with the top 5 by underpricing. A watchlist table follows. The strategy layer prints progress lines only, per the console architecture (`docs/CONSOLE_DEVELOPER_GUIDE.md`).
 
 ---
 
-## 9. Post-Earnings Analysis: Two-Source Architecture
+## 11. Performance Tracking
 
-The post-earnings calculation engine (`ei_post_earnings_calc.py`) computes metrics for each stock after it reports earnings. The calculation has a deliberate **two-source architecture** for resilience:
+Phase 6 writes `performance.db.ei_pipeline_performance` via `tools/performance_writer._write_ei_performance()`. `PK (trade_date, run_type)`, where `run_type` is `daily_pipeline` (from step `1.2 Earnings Intelligence`) or `weekly_refresh` (from step `5.3 Earnings Refresh`).
 
-### Price Moves
+| Column | Run type | Source |
+|--------|----------|--------|
+| `duration_seconds`, `success`, `error_count` | both | top-level result |
+| `snapshots_created`, `moves_calculated`, `alerts_triggered` | daily | top-level |
+| `snapshot_seconds`, `calculation_seconds`, `expected_move_seconds` | daily | `sub_tasks.*.duration_seconds` |
+| `watchlist_count`, `watchlist_new`, `news_enriched`, `watchlist_seconds`, `news_seconds` | daily | top-level / sub_tasks |
+| `earnings_today`, `opportunities_found`, `high_quality`, `medium_quality`, `low_quality`, `persisted` | daily | arbitrage sub-task (all zero while the scan is disabled) |
+| `earnings_found`, `events_archived`, `records_cleaned`, `upcoming_count` | weekly | top-level |
+| `fetch_seconds`, `archive_seconds`, `cleanup_seconds` | weekly | sub_tasks |
 
-**Primary path:** Query `earnings_snapshots` for pre-earnings and post-earnings close prices. Compute `move_1day_pct` through `move_5day_pct` as percentage changes from T0 (earnings day close).
-
-**Fallback path:** If snapshots are empty (which they were for all events before Feb 25, 2026), query `historical_prices` for daily close prices at T-1, T0, T+1, T+2, T+3, T+5. Uses `on_or_after` date lookups to handle weekends and holidays. `max_intraday_move_pct` is approximated from T+1 OHLC as `max(|high - open|, |low - open|) / open * 100`.
-
-### IV Changes
-
-**Primary path:** Query `earnings_snapshots` for T-7, T-1, T+1, T+3 IV snapshots. Compute `iv_buildup_pct` (T-7 to T-1), `iv_collapse_pct` (T-1 to T+1), `iv_recovery_pct` (T+1 to T+3).
-
-**Fallback path:** Query `option_symbol_summary` directly for `front_month_iv` on the relevant dates. This is the active path for all current data. Same IV crush severity classification applies.
-
-### Move vs Expected
-
-After price moves and IV are computed, the engine calculates:
-```
-move_vs_expected_pct = (abs(move_1day_pct) / expected_move_pct) * 100
-```
-Where `expected_move_pct` is the 1-day IV-based expected move as of the earnings date. A value >100 means the stock moved *more* than implied; <100 means it moved *less*. This metric is central to signal threshold calibration.
+Not persisted to this table: lite-refresh metrics, the daily archive count, and the event_id backfill count. These appear only in the result dict, the diagnostic log (`logs/diagnostic/`), and the EI health report. Dispute history is available in `earnings_date_disputes`.
 
 ---
 
-## 10. Performance Tracking
+## 12. Known Limitations & Open Work
 
-EI pipeline performance is written to `data/performance.db` in the `ei_pipeline_performance` table by `tools/performance_writer.py` during Phase 6 (end-of-day system maintenance).
+### Active limitations
 
-### Tracked Metrics
+1. **Signal thresholds have never been calibrated.** WATCH/BUY/STRONG BUY (15/30/50) are the 2026-02-10 distribution-based values. Outcome data now exists. A raw count as of 2026-10-14 (events with a `straddle_outcome`, by the signal they carried) is shown below. It is *descriptive only*: it mixes pre- and post-6Q-recency signals, ignores liquidity and timing, and is not a validation.
 
-| Column | Source |
-|--------|--------|
-| `duration_seconds` | Total pipeline wall-clock time |
-| `snapshots_created` | Count of new snapshot rows written |
-| `moves_calculated` | Count of post-earnings moves computed |
-| `alerts_triggered` | Count of earnings alerts fired |
-| `snapshot_seconds` | Sub-step 1 duration |
-| `calculation_seconds` | Sub-step 2 duration |
-| `expected_move_seconds` | Sub-step 3 duration |
-| `watchlist_count` | Total symbols on watchlist |
-| `watchlist_new` | Symbols added this run |
-| `watchlist_seconds` | Sub-step 4 duration |
-| `news_enriched` | Symbols that received news sentiment |
-| `news_seconds` | Sub-step 5 duration |
-| `earnings_found` | (Weekly) Symbols returned by Finnhub + YFinance |
-| `events_archived` | (Weekly) Events moved to earnings_events |
-| `records_cleaned` | (Weekly) Old entries deleted from earnings_upcoming |
-| `fetch_seconds` / `archive_seconds` / `cleanup_seconds` | (Weekly) Sub-task durations |
+   | Signal | Events | PROFIT | LOSS | Avg move vs straddle |
+   |---|---|---|---|---|
+   | STRONG BUY | 68 | 21 | 42 | 97.3% |
+   | BUY | 62 | 29 | 31 | 111.9% |
+   | WATCH | 86 | 21 | 59 | 76.2% |
+   | NEUTRAL | 120 | 51 | 63 | 113.7% |
+   | AVOID | 1,175 | 256 | 846 | 72.8% |
 
-The `run_type` column distinguishes `'daily_pipeline'` from `'weekly_refresh'` rows.
+2. **Arbitrage scanner disabled.** Sub-step 8 is a stub. The scanner code and `--morning-scan` mode remain.
+3. **Peer snapshot `event_id`.** For peer rows (`is_primary_symbol = 0`), both the writer and the 3.5 backfill look up `earnings_events` by the *peer's* symbol. A peer row therefore gets an `event_id` only when the peer itself reported within ±3 days, and that id is the peer's event, not the primary's. As of 2026-10-14, about 23.6K of 31.7K peer rows have a NULL `event_id`. Don't treat peer `event_id` as the primary event's key.
+4. **News budget.** 25 Alpha Vantage calls/day shared with Flow Monitor. The 3-day backfill from existing articles softens the impact.
+5. **Timing coverage.** As of 2026-10-14, 540 of 777 `earnings_upcoming` rows have bmo/amc/dmh. The rest are `Unknown`; the lite refresh flags these for future events within 21 days, and the researcher resolves them.
+6. **Docstring drift.** Some module docstrings predate later changes. The `ei_post_earnings_calc.py` header lists `option_symbol_summary` as the primary IV source, but the code tries snapshots first. Its `_get_expected_move_at_earnings` docstring describes `option_symbol_summary` as Tier 2/30-day, but it is Tier 3 with a 300-day override since SA P028. `ei_collector.py`'s class docstring says existing dates are never overwritten, but the code updates them from yfinance. The weekly runner's mission box says "Finnhub per-symbol". This guide follows the code.
 
----
+### Open work
 
-## 11. Known Limitations & Deferred Work
+| Item | Status |
+|------|--------|
+| Signal threshold calibration | Data available; not started |
+| Arbitrage scanner re-enable | Waiting on design decision |
+| Post-earnings actuals (`actual_eps` on `earnings_events`) | Not implemented |
+| Lite-refresh metrics in `ei_pipeline_performance` | Not implemented |
 
-### Active Limitations
-
-1. **Snapshot ramp-up period.** The `earnings_snapshots` collector was fixed on Feb 25, 2026. The primary price moves path (from snapshots) will not have meaningful data until ~March 11, 2026. Until then, the `historical_prices` fallback handles all post-earnings calculations. This is working correctly — it's a data accumulation gap, not a code issue.
-
-2. **Signal thresholds are provisional.** The WATCH (15%), BUY (30%), STRONG BUY (50%) thresholds were set from universe distribution analysis, not outcome validation. Calibration requires ~100 events with `move_vs_expected_pct` data (~early March 2026). The thresholds may shift once we can answer "did STRONG BUY signals actually correspond to profitable trades?"
-
-3. **Arbitrage scanner produces sparse output.** The sector sympathy scanner requires same-day earnings reporters with populated `industry_peer_mappings`. On most days this yields 0 opportunities. The infrastructure is sound; the feature will grow in value as the peer mapping table expands.
-
-4. **News budget constraint.** Alpha Vantage allows 25 API calls per day across the entire system (EI + Flow Monitor). On days with many new watchlist entries, some symbols will not receive news enrichment. Budget exhaustion is treated as a non-error condition.
-
-5. **`earnings_time` coverage.** Finnhub provides BMO/AMC timing for ~26% of the KLMN 800 universe (189 of 728 symbols as of Feb 2026). The remaining 74% show "Unknown." This is a data availability limitation of the free Finnhub tier, not a bug.
-
-### Deferred Features
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| **Snapshot wiring verification** | Deferred to ~March 11 | Verify snapshots accumulating and primary calc path fires |
-| **Signal threshold recalibration** | Pending ~100 events | Will validate WATCH/BUY/STRONG BUY against actual outcomes |
-| **Post-earnings Finnhub actuals** | Planned | `eps_actual` / `revenue_actual` → populate NULL `actual_eps` on `earnings_events` |
-| **Scenario calculator** | Proposal written | See `docs/_local/earnings-scenario-calculator-proposal.md` (parked) |
-| **YFinance deprecation** | Evaluate after 2-3 weeks | If Finnhub covers all needed symbols, drop YFinance entirely |
-| **Daily Finnhub scan** | Not planned | Address only if mid-week earnings date shifts become a problem |
-| **Morning View TUI screen** | Console output covers it | Dedicated TUI screen for earnings watchlist display |
+Completed since the last revision: earnings scenario calculator (`tools/earnings_scenario.py`, doc `docs/earnings-scenario-calculator.md`); Morning View earnings screens (`morning_view/screens/earnings_browser.py`); snapshot ramp-up (primary snapshot path active since March 2026).
 
 ---
 
@@ -423,19 +468,23 @@ The `run_type` column distinguishes `'daily_pipeline'` from `'weekly_refresh'` r
 
 | File | Role |
 |------|------|
-| `strategies/earnings_intel/ei_main.py` | Pipeline orchestrator (daily + weekly modes) |
-| `strategies/earnings_intel/ei_fetch_upcoming.py` | Finnhub (primary) + YFinance (fallback) calendar refresh |
-| `strategies/earnings_intel/ei_moves_upcoming.py` | Expected move calculation, signal classification, alert logic |
-| `strategies/earnings_intel/ei_watchlist.py` | Earnings watchlist population and lifecycle management |
-| `strategies/earnings_intel/ei_post_earnings_calc.py` | Post-earnings price moves, IV changes, crush severity |
-| `strategies/earnings_intel/ei_snapshot_collector.py` | Daily IV/price snapshot collection (T-7 to T+3) |
-| `strategies/earnings_intel/ei_arbitrage_scanner.py` | Sector sympathy / IV arbitrage opportunity scanner |
-| `strategies/earnings_intel/ei_health_reporter.py` | EI-specific health status reporting |
-| `strategies/earnings_intel/ei_backfill_price_moves.py` | One-time migration script (3-pass backfill, Feb 2026) |
-| `core/finnhub_api.py` | Finnhub API client (rate limiter + earnings calendar) |
-| `tools/news_sentiment.py` | Alpha Vantage news sentiment (shared with Flow Monitor) |
-| `tools/performance_writer.py` | End-of-day performance metrics writer |
-| `main_runners.py` | Orchestrator runner: `run_earnings_intelligence()` (line 1006) |
+| `strategies/earnings_intel/ei_main.py` | Daily pipeline orchestrator (8 sub-steps), `--morning-scan` |
+| `strategies/earnings_intel/ei_lite_refresh.py` | Daily near-term date verification, dispute flagging, researcher spawn |
+| `strategies/earnings_intel/ei_collector.py` | Weekly refresh: archive, cleanup, yfinance+Finnhub fetch, drift detection |
+| `strategies/earnings_intel/ei_moves_upcoming.py` | Straddle expected move, recent-6Q history, signals, alert flag |
+| `strategies/earnings_intel/ei_watchlist.py` | Watchlist lifecycle, enrichment, news backfill |
+| `strategies/earnings_intel/ei_post_earnings_calc.py` | Price moves, IV crush, outcomes, sector effects |
+| `strategies/earnings_intel/ei_snapshot_collector.py` | Daily T-7…T+5 snapshots (primary + peers) |
+| `strategies/earnings_intel/ei_arbitrage_scanner.py` | Sector sympathy scanner (not run in daily pipeline) |
+| `strategies/earnings_intel/ei_health_reporter.py` | EI health status reporting |
+| `strategies/earnings_intel/ei_backfill_*.py` | One-time backfill/migration scripts |
+| `tools/earnings_confirm.py` | Only writer of `date_confirmed` (human + agent) |
+| `tools/backfill_earnings_events_derived.py` | Recompute `earnings_events` derived columns (SA P016) |
+| `tools/earnings_scenario.py` | Earnings scenario calculator |
+| `tools/news_sentiment.py` | Alpha Vantage sentiment (shared with Flow Monitor) |
+| `tools/performance_writer.py` | `ei_pipeline_performance` + canonical DDL for date-source/dispute tables |
+| `core/finnhub_api.py` | Finnhub client |
+| `main_runners.py` | `run_earnings_intelligence()`, `run_earnings_weekly_refresh()` |
 
 ---
 
@@ -444,8 +493,20 @@ The `run_type` column distinguishes `'daily_pipeline'` from `'weekly_refresh'` r
 | Date | Change |
 |------|--------|
 | 2025-10-10 | Initial Earnings Intelligence system (PRD 0003) |
-| 2026-02-10 | Signal recalibration: `relative_underpricing_pct` replaces `move_difference_pct` as primary metric |
-| 2026-02-25 | Phase 0: Stale data filter, snapshot collector fix, logging cleanup |
-| 2026-02-26 | Phase 1 (PRD 0008): Earnings watchlist, 6-step morning pipeline, step renumbering |
-| 2026-02-26 | Phase 2 (0009): Finnhub integration — primary calendar source, BMO/AMC timing |
-| 2026-02-26 | Phase 3 (0010): Price moves fallback, earnings_date denormalization, signal archival, historical backfill |
+| 2026-02-10 | Signal recalibration: `relative_underpricing_pct` replaces `move_difference_pct` |
+| 2026-02-25 | Phase 0: stale data filter, snapshot collector fix, logging cleanup |
+| 2026-02-26 | Phases 1–3 (PRDs 0008–0010): watchlist, Finnhub timing, price-move fallback, signal archival |
+| 2026-03-05 | Date source rewire: yfinance primary for dates, Finnhub for timing (`ei_collector.py`) |
+| 2026-04-13 | Recent-6Q historical average drives signal; all-time stored alongside |
+| 2026-04-14 | Watchlist audit: T+3 outcome columns removed; `vol_balance_text`, `iv_front_month_change_5d` added |
+| 2026-04-16 | Straddle-only underpricing; DB-backed symbol lists (PRD 0013) |
+| 2026-04-20 | Outcome + signal-accuracy columns on `earnings_events` |
+| 2026-04-22 | Archive runs daily, not just Fridays |
+| 2026-04-23 | Lite refresh (sub-step 1), date confirmation, dispute table, Earnings Researcher spawn |
+| 2026-04-25 | Peak-exit straddle outcome (SA P015); derived-column refresh (SA P016); archive fallback for expected move (TA P003) |
+| 2026-04-26 | `expected_move_pct` dropped from upcoming/events/watchlist (SA P017) |
+| 2026-05-04 | Snapshot writer populates `event_id` (SA P020) |
+| 2026-05-14 | Confirmed-row drift detection (SA P021); event_id backfill sub-step 3.5 + snapshot join-key policy (SA P029) |
+| 2026-06-07 | Config switch to disable main.py-launched agents |
+| 2026-09-24 | Researcher also spawns when unconfirmed rows are due within 14 days |
+| 2026-10-14 | This guide rewritten against current code |
