@@ -1,5 +1,7 @@
 # Earnings Intelligence Refactor — Research & Findings
 
+> **HISTORICAL DOCUMENT — superseded.** This is the February 2026 research record for the EI refactor, kept because the PRDs in `tasks/` cite it. Table counts, component descriptions and "problems to solve" reflect that time, not the current system. For how EI works today, see [`EARNINGS_INTELLIGENCE_TECHNICAL_GUIDE.md`](EARNINGS_INTELLIGENCE_TECHNICAL_GUIDE.md).
+
 **Started**: 2026-02-23
 **Status**: Research Phase — collecting information, auditing data, defining goals
 **Goal**: Make the Earnings Intelligence system actually useful for making money

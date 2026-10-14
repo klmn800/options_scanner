@@ -305,7 +305,7 @@ result = subprocess.run(
 - **Database Tools**: `docs/database-tools.md` - Detailed tool usage and examples
 - **Trading Style**: `docs/trading-style.md` - Ben's trading approach, constraints, and position management
 - **News Sentiment Design**: `docs/news_sentiment.md` - Architecture decisions, relevance weighting, API budget, deprecation history
-- **Earnings Intelligence Manual Operations**: `strategies/earnings_intel/docs/MANUAL_OPERATIONS.md` - Trading journal, SQL queries, and manual tasks
+- **Earnings Intelligence Technical Guide**: `docs/earnings_strategy_refactor/EARNINGS_INTELLIGENCE_TECHNICAL_GUIDE.md` - Single EI reference: pipeline, signals, tables, operations, queries, troubleshooting
 - **Performance Database Schema**: `docs/performance_tracking_enhancement/performance_db_schema.md` - 16-table schema for `data/performance.db`
 - **Deprecation Notes**:
   - `Deprecated/chrome_extension/CHROME_EXTENSION_DEPRECATION.md` - Chrome extension (2025-10-14)

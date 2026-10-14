@@ -470,6 +470,97 @@ Completed since the last revision: earnings scenario calculator (`tools/earnings
 
 ---
 
+## 13. Operations & Queries
+
+### Downstream consumers
+- **Flow Monitor watchlist** — `strategies/flow_monitor/fm_watchlist.py` copies `earnings_date`, `earnings_time`, `earnings_play_signal`, and `relative_underpricing_pct` from `earnings_upcoming` into `flow_watchlist_daily` when it **creates** an entry. The values are not refreshed on later scans, so they reflect the signal on the entry date.
+- **Morning View** — reads `earnings_upcoming` (including `earnings_alert`) and `earnings_watchlist`; `morning_view/screens/earnings_browser.py` is the earnings screen.
+- **Earnings Researcher agent** — reads `earnings_date_disputes` and unconfirmed `earnings_upcoming` rows, and writes confirmations through `tools/earnings_confirm.py` (Section 4).
+
+### Manual operations
+
+**Confirming a date.** Use `tools/earnings_confirm.py` rather than editing `earnings_upcoming` directly (Section 4). `--list-unconfirmed` shows what the lite refresh will keep checking.
+
+**Recalculating post-earnings metrics.**
+```bash
+python strategies/earnings_intel/ei_post_earnings_calc.py --recalculate --no-interaction       # T+3..T+10 window, overwrites
+python strategies/earnings_intel/ei_post_earnings_calc.py --backfill-outcomes --no-interaction # fill NULL outcome columns from earnings_moves
+python strategies/earnings_intel/ei_snapshot_collector.py --backfill --no-interaction          # repair snapshots with NULL OHLC
+python tools/backfill_earnings_events_derived.py --symbols NVDA --apply                        # refresh derived signal columns
+```
+To recalculate a single older event, delete its `earnings_moves` row (by `event_id`) and run `--recalculate` with `--trade-date` set 3–10 days after that event.
+
+**Industry leaders.** `industry_peer_mappings.is_industry_leader` sets which peers get snapshotted first (`SnapshotCollector._get_peer_symbols` sorts leaders first and takes 4). As of 2026-10-14 no leaders are set, so peers are chosen alphabetically within each industry.
+```sql
+UPDATE industry_peer_mappings SET is_industry_leader = 1
+WHERE industry = 'Semiconductors' AND symbol IN ('NVDA', 'AMD');
+```
+
+**Trading journal.** `earnings_events` has `notes`, `tags`, `note_type` (trade / observation / pattern / lesson), and `sentiment` columns. Morning View's admin trading-journal screen writes them (`morning_view/admin_data.append_journal_note`). As of 2026-10-14 none are filled in.
+
+### Queries
+
+Run with `python tools/direct_db_query.py --sql "..."` (query DB). Add `--db data/performance.db` for the dispute tables.
+
+```sql
+-- Current watchlist, best first
+SELECT symbol, status, earnings_date, earnings_time, earnings_play_signal,
+       relative_underpricing_pct, straddle_expected_move_pct, iv_front_month_change_5d
+FROM earnings_watchlist ORDER BY relative_underpricing_pct DESC;
+
+-- Upcoming actionable signals, with confirmation state
+SELECT symbol, earnings_date, earnings_time, earnings_play_signal,
+       relative_underpricing_pct, date_confirmed
+FROM earnings_upcoming
+WHERE earnings_play_signal IN ('WATCH', 'BUY', 'STRONG BUY') AND earnings_date >= DATE('now')
+ORDER BY earnings_date;
+
+-- Signal vs outcome (signal frozen at archive time)
+SELECT earnings_play_signal, COUNT(*) AS n,
+       SUM(straddle_outcome = 'PROFIT') AS profit_close_exit,
+       SUM(straddle_outcome_max = 'PROFIT') AS profit_peak_exit,
+       SUM(signal_accuracy = 'CONFIRMED') AS confirmed
+FROM earnings_events WHERE straddle_outcome IS NOT NULL
+GROUP BY earnings_play_signal ORDER BY n DESC;
+
+-- One symbol's earnings history (join on event_id, never on symbol alone)
+SELECT ee.earnings_date, ee.earnings_time, em.move_1day_pct, em.max_intraday_move_pct,
+       em.expected_move_entry_pct, em.move_vs_expected_pct, em.iv_collapse_pct, em.iv_crush_severity
+FROM earnings_moves em JOIN earnings_events ee ON em.event_id = ee.event_id
+WHERE em.symbol = 'NVDA' ORDER BY ee.earnings_date DESC;
+
+-- Snapshot series for an event (primary symbol; join on event_id per the snapshot policy)
+SELECT es.snapshot_date, es.days_from_earnings, es.close_price, es.iv_30dte, es.straddle_expected_move_pct
+FROM earnings_snapshots es JOIN earnings_events ee ON es.event_id = ee.event_id
+WHERE ee.symbol = 'NVDA' AND ee.earnings_date = '2026-08-26' AND es.is_primary_symbol = 1
+ORDER BY es.days_from_earnings;
+
+-- Peer sympathy for an event
+SELECT peer_symbol, primary_move_pct, peer_move_pct, iv_arbitrage_delta,
+       correlation_strength, arbitrage_quality
+FROM earnings_sector_effects
+WHERE primary_event_id = (SELECT event_id FROM earnings_events WHERE symbol = 'NVDA' AND earnings_date = '2026-08-26');
+
+-- Today's open date disputes (performance.db)
+SELECT symbol, db_date, yfinance_date, finnhub_date, dispute_reason
+FROM earnings_date_disputes
+WHERE trade_date = (SELECT MAX(trade_date) FROM earnings_date_disputes) AND resolution = 'unresolved';
+```
+
+### Troubleshooting
+
+| Symptom | Likely cause | Check |
+|---|---|---|
+| Signal `UNKNOWN` inside 14 days | No post-earnings expiration with both ATM call and put priced, or no `earnings_moves` history | `option_contracts` for the symbol on the latest `trade_date` with `expiration_date >= earnings_date`; `COUNT(*)` in `earnings_moves` |
+| Snapshot rows with NULL IV | Option Pipeline had no IV for that symbol/day | `iv_30dte`, `iv_front_month` in `option_symbol_summary` for the snapshot's `data_date` |
+| Event never gets `earnings_moves` | Event not archived, or outside the 3–10 day window when the pipeline ran | `earnings_events` row exists; rerun with `--recalculate --trade-date` |
+| `earnings_moves` row keeps recomputing | `iv_collapse_pct` is NULL, so the event is retried daily until day 10 | IV around the earnings date in snapshots / `option_symbol_summary` |
+| Stored date wrong | Unconfirmed: lite refresh or Friday refresh will follow yfinance. Confirmed: locked, divergence logged as `confirmed_row_diverged` | `earnings_date_disputes`; fix with `tools/earnings_confirm.py` |
+| Researcher didn't spawn | No disputes and nothing unconfirmed within 14 days, agent disabled in `config.json`, or not installed | lite-refresh log lines in the daily console / `logs/diagnostic/` |
+| News columns empty | Alpha Vantage budget used up and no FM-collected articles in the last 3 days | `python tools/news_sentiment.py --budget` |
+
+---
+
 ## File Reference
 
 | File | Role |
@@ -515,4 +606,4 @@ Completed since the last revision: earnings scenario calculator (`tools/earnings
 | 2026-05-14 | Confirmed-row drift detection (SA P021); event_id backfill sub-step 3.5 + snapshot join-key policy (SA P029) |
 | 2026-06-07 | Config switch to disable main.py-launched agents |
 | 2026-09-24 | Researcher also spawns when unconfirmed rows are due within 14 days |
-| 2026-10-14 | This guide rewritten against current code |
+| 2026-10-14 | This guide rewritten against current code; absorbed the User Guide, `MANUAL_OPERATIONS.md`, and the autofix EI guide (Section 13). This is now the single technical reference. |
