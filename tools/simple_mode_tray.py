@@ -178,7 +178,7 @@ def tooltip(st):
     parts = ['Options Scanner: ' + st['headline']]
     times = st['fm'].get('cycle_times') or []
     if st['cycles']:
-        parts.append('cycle {}'.format(len(st['cycles'])))
+        parts.append('{} cycles done'.format(len(st['cycles'])))
         parts.append('last {}'.format(st['last_end'].strftime('%H:%M')))
     if times:
         parts.append('avg {}'.format(_fmt_dur(sum(times) / len(times))))
