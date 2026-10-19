@@ -261,7 +261,6 @@ def week_panel(now, calendar):
         row = conn.execute(sql, (date_str,)).fetchone()
         return None if row is None else bool(row[0])
 
-    legacy_friday = False
     try:
         for date_str in previous_trading_days(now, calendar):
             n, avg, rows = conn.execute(
@@ -275,7 +274,6 @@ def week_panel(now, calendar):
                 # recorded under Saturday's date (fixed in PRD 0014 task 3B)
                 nxt = (datetime.strptime(date_str, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
                 op, bk = _flag(op_sql, nxt), _flag(bk_sql, nxt)
-                legacy_friday = legacy_friday or not n
 
             def _ok(v):
                 return '-' if v is None else ('OK' if v else 'FAILED')
@@ -285,8 +283,6 @@ def week_panel(now, calendar):
                 _fmt_dur(avg) if avg else '-', _ok(op), _ok(bk)))
     finally:
         conn.close()
-    if legacy_friday:
-        lines.append('  (Fridays before 2026-10-19 have no cycle history: Phase 6 ran after midnight and missed it.)')
     return lines
 
 
