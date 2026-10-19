@@ -1602,122 +1602,125 @@ def run_market_hours(early_start=False):
                     # Don't crash on verification error - continue monitoring
 
                 # Analysis phase
-                print("")  # Visual separation after collection heartbeat
-                beautiful_log("Starting FM Analyzer", 'info')
-                analysis_start = time.time()
-                analyzer.analyze(scan_timestamp)
-                analysis_elapsed = time.time() - analysis_start
-                analysis_query_elapsed = getattr(analyzer, 'last_query_elapsed', 0.0)
-                analysis_scoring_elapsed = getattr(analyzer, 'last_scoring_elapsed', 0.0)
-                analysis_db_write_elapsed = getattr(analyzer, 'last_db_write_elapsed', 0.0)
+                if not check_task_disabled('FM Analyzer'):
+                    print("")  # Visual separation after collection heartbeat
+                    beautiful_log("Starting FM Analyzer", 'info')
+                    analysis_start = time.time()
+                    analyzer.analyze(scan_timestamp)
+                    analysis_elapsed = time.time() - analysis_start
+                    analysis_query_elapsed = getattr(analyzer, 'last_query_elapsed', 0.0)
+                    analysis_scoring_elapsed = getattr(analyzer, 'last_scoring_elapsed', 0.0)
+                    analysis_db_write_elapsed = getattr(analyzer, 'last_db_write_elapsed', 0.0)
 
-                # Alert phase
-                print("")
-                beautiful_log("Starting FM Alerts", 'info')
-                alert_start = time.time()
-                alerts.process_alerts(scan_timestamp,
-                                      scan_contracts=getattr(analyzer, 'last_scan_contracts', None))
-                alert_elapsed = time.time() - alert_start
-
-                # Count alerts actually generated this cycle (after process_alerts creates them)
-                try:
-                    alert_count_result = storage.query_with_params(
-                        "SELECT COUNT(*) as cnt FROM flow_alerts WHERE scan_timestamp = ?",
-                        (scan_timestamp,))
-                    alerts_stored = alert_count_result[0]['cnt'] if alert_count_result else 0
-                except Exception:
-                    pass  # Keep whatever alerts_stored was before
-
-                # Watchlist phase
-                print("")
-                beautiful_log("Starting FM Watchlist", 'info')
-                watchlist_start = time.time()
-                try:
-                    # Build current prices dict from collected data (single batch query)
-                    current_prices = {}
-                    price_query = """
-                        SELECT symbol, underlying_price FROM flow_options_scans
-                        WHERE scan_timestamp = ?
-                        GROUP BY symbol
-                    """
-                    price_results = storage.query_with_params(price_query, (scan_timestamp,))
-                    for row in price_results:
-                        current_prices[row['symbol']] = row['underlying_price']
-
-                    # Update watchlist from new alerts
-                    trade_date = now_eastern().strftime('%Y-%m-%d')
-                    watchlist_result = fm_watchlist.update_daily_watchlist(trade_date, storage, scan_timestamp)
-
-                    # News enrichment phase (only when new watchlist entries created)
-                    created_symbols = watchlist_result.get('created_symbols', [])
-                    cycle_news_stats = None
-                    if created_symbols:
-                        print("")
-                        beautiful_log("Starting FM News Enrichment", 'info')
-                        try:
-                            from tools.news_sentiment import enrich_watchlist_batch
-                            cycle_news_stats = enrich_watchlist_batch(created_symbols, storage)
-                            if cycle_news_stats.get('enriched', 0) > 0 or cycle_news_stats.get('failed', 0) > 0:
-                                beautiful_log("News enrichment complete: {} enriched, {} skipped, {} failed".format(
-                                    cycle_news_stats.get('enriched', 0), cycle_news_stats.get('skipped', 0), cycle_news_stats.get('failed', 0)), 'success')
-
-                                # Display per-symbol sentiment results
-                                from tools.log_utils import log_to_file
-                                for detail in cycle_news_stats.get('details', []):
-                                    sym = detail['symbol']
-                                    score = detail['score']
-                                    label = detail['label']
-                                    articles = detail['articles']
-                                    if score is not None:
-                                        # Color-code: positive=green, negative=red, neutral=yellow
-                                        if score > 0.1:
-                                            sentiment_indicator = "\033[92m{:+.2f}\033[0m".format(score)
-                                        elif score < -0.1:
-                                            sentiment_indicator = "\033[91m{:+.2f}\033[0m".format(score)
-                                        else:
-                                            sentiment_indicator = "\033[93m{:+.2f}\033[0m".format(score)
-                                        line = "     {} │ {} │ {} ({} articles)".format(
-                                            sym.ljust(6), sentiment_indicator, label, articles)
-                                    else:
-                                        line = "     {} │ No relevant articles".format(sym.ljust(6))
-                                    print(line)
-                                    log_to_file("     {} | score={} | {} | {} articles".format(
-                                        sym, score, label, articles))
-
-                            # Persist API usage counters to daily_state.json
-                            fm_api_calls = cycle_news_stats.get('enriched', 0) + cycle_news_stats.get('failed', 0)
-                            if fm_api_calls > 0:
-                                try:
-                                    from main_ui import _save_news_api_usage
-                                    _save_news_api_usage(
-                                        source='fm',
-                                        api_calls=fm_api_calls,
-                                        symbols_enriched=cycle_news_stats.get('enriched', 0),
-                                        zero_article_calls=cycle_news_stats.get('failed', 0),
-                                    )
-                                except Exception as usage_err:
-                                    logging.debug("Could not save news API usage: {}".format(usage_err))
-                        except Exception as news_error:
-                            logging.warning("News enrichment failed (non-critical): {}".format(news_error))
-                            from tools.autofix import queue_error
-                            queue_error(
-                                error_type='news_enrichment_module_error',
-                                context={
-                                    'exception_type': type(news_error).__name__,
-                                    'error_message': str(news_error),
-                                    'symbols_attempted': created_symbols,
-                                    'trade_date': trade_date,
-                                },
-                                severity='WARNING'
-                            )
-
-                    # Dip detection phase
+                # Alert phase (email digests and X posting hang off alert saves)
+                if not check_task_disabled('FM Alerts'):
                     print("")
-                    beautiful_log("Starting FM Dip Detection", 'info')
-                    fm_watchlist.update_prices_and_detect(storage, current_prices, config=config)
+                    beautiful_log("Starting FM Alerts", 'info')
+                    alert_start = time.time()
+                    alerts.process_alerts(scan_timestamp,
+                                          scan_contracts=getattr(analyzer, 'last_scan_contracts', None))
+                    alert_elapsed = time.time() - alert_start
 
-                except Exception as watchlist_error:
-                    logging.error("Watchlist update error (non-critical): {}".format(watchlist_error))
+                    # Count alerts actually generated this cycle (after process_alerts creates them)
+                    try:
+                        alert_count_result = storage.query_with_params(
+                            "SELECT COUNT(*) as cnt FROM flow_alerts WHERE scan_timestamp = ?",
+                            (scan_timestamp,))
+                        alerts_stored = alert_count_result[0]['cnt'] if alert_count_result else 0
+                    except Exception:
+                        pass  # Keep whatever alerts_stored was before
+
+                # Watchlist phase (news enrichment and dip detection run inside it)
+                watchlist_start = time.time()
+                if not check_task_disabled('FM Watchlist'):
+                    print("")
+                    beautiful_log("Starting FM Watchlist", 'info')
+                    try:
+                        # Build current prices dict from collected data (single batch query)
+                        current_prices = {}
+                        price_query = """
+                            SELECT symbol, underlying_price FROM flow_options_scans
+                            WHERE scan_timestamp = ?
+                            GROUP BY symbol
+                        """
+                        price_results = storage.query_with_params(price_query, (scan_timestamp,))
+                        for row in price_results:
+                            current_prices[row['symbol']] = row['underlying_price']
+
+                        # Update watchlist from new alerts
+                        trade_date = now_eastern().strftime('%Y-%m-%d')
+                        watchlist_result = fm_watchlist.update_daily_watchlist(trade_date, storage, scan_timestamp)
+
+                        # News enrichment phase (only when new watchlist entries created)
+                        created_symbols = watchlist_result.get('created_symbols', [])
+                        cycle_news_stats = None
+                        if created_symbols:
+                            print("")
+                            beautiful_log("Starting FM News Enrichment", 'info')
+                            try:
+                                from tools.news_sentiment import enrich_watchlist_batch
+                                cycle_news_stats = enrich_watchlist_batch(created_symbols, storage)
+                                if cycle_news_stats.get('enriched', 0) > 0 or cycle_news_stats.get('failed', 0) > 0:
+                                    beautiful_log("News enrichment complete: {} enriched, {} skipped, {} failed".format(
+                                        cycle_news_stats.get('enriched', 0), cycle_news_stats.get('skipped', 0), cycle_news_stats.get('failed', 0)), 'success')
+
+                                    # Display per-symbol sentiment results
+                                    from tools.log_utils import log_to_file
+                                    for detail in cycle_news_stats.get('details', []):
+                                        sym = detail['symbol']
+                                        score = detail['score']
+                                        label = detail['label']
+                                        articles = detail['articles']
+                                        if score is not None:
+                                            # Color-code: positive=green, negative=red, neutral=yellow
+                                            if score > 0.1:
+                                                sentiment_indicator = "\033[92m{:+.2f}\033[0m".format(score)
+                                            elif score < -0.1:
+                                                sentiment_indicator = "\033[91m{:+.2f}\033[0m".format(score)
+                                            else:
+                                                sentiment_indicator = "\033[93m{:+.2f}\033[0m".format(score)
+                                            line = "     {} │ {} │ {} ({} articles)".format(
+                                                sym.ljust(6), sentiment_indicator, label, articles)
+                                        else:
+                                            line = "     {} │ No relevant articles".format(sym.ljust(6))
+                                        print(line)
+                                        log_to_file("     {} | score={} | {} | {} articles".format(
+                                            sym, score, label, articles))
+
+                                # Persist API usage counters to daily_state.json
+                                fm_api_calls = cycle_news_stats.get('enriched', 0) + cycle_news_stats.get('failed', 0)
+                                if fm_api_calls > 0:
+                                    try:
+                                        from main_ui import _save_news_api_usage
+                                        _save_news_api_usage(
+                                            source='fm',
+                                            api_calls=fm_api_calls,
+                                            symbols_enriched=cycle_news_stats.get('enriched', 0),
+                                            zero_article_calls=cycle_news_stats.get('failed', 0),
+                                        )
+                                    except Exception as usage_err:
+                                        logging.debug("Could not save news API usage: {}".format(usage_err))
+                            except Exception as news_error:
+                                logging.warning("News enrichment failed (non-critical): {}".format(news_error))
+                                from tools.autofix import queue_error
+                                queue_error(
+                                    error_type='news_enrichment_module_error',
+                                    context={
+                                        'exception_type': type(news_error).__name__,
+                                        'error_message': str(news_error),
+                                        'symbols_attempted': created_symbols,
+                                        'trade_date': trade_date,
+                                    },
+                                    severity='WARNING'
+                                )
+
+                        # Dip detection phase
+                        print("")
+                        beautiful_log("Starting FM Dip Detection", 'info')
+                        fm_watchlist.update_prices_and_detect(storage, current_prices, config=config)
+
+                    except Exception as watchlist_error:
+                        logging.error("Watchlist update error (non-critical): {}".format(watchlist_error))
 
                 watchlist_elapsed = time.time() - watchlist_start
 
@@ -1728,7 +1731,7 @@ def run_market_hours(early_start=False):
                 periodic_check_interval = earnings_tracker.check_interval if earnings_tracker else 4
                 run_periodic = scan_timestamp and cycle >= 2 and (cycle - 2) % periodic_check_interval == 0
 
-                if run_periodic and earnings_tracker:
+                if run_periodic and earnings_tracker and not check_task_disabled('FM Earnings Signals'):
                     print("")
                     beautiful_log("Checking Earnings Signals (every {} cycles)".format(
                         earnings_tracker.check_interval), 'info')
@@ -1746,7 +1749,7 @@ def run_market_hours(early_start=False):
                         logging.warning("Earnings signal tracking error (non-critical): {}".format(e))
                     earnings_signal_elapsed = time.time() - est_start
 
-                if run_periodic:
+                if run_periodic and not check_task_disabled('FM Intraday Trade Ingest'):
                     print("")
                     beautiful_log("Checking Trade Ingest", 'info')
                     ti_start = time.time()
@@ -1763,9 +1766,10 @@ def run_market_hours(early_start=False):
                     trade_ingest_elapsed = time.time() - ti_start
 
                 # Quick-sync phase
-                print("")
-                beautiful_log("Starting Quick Sync", 'info')
-                sync_success, sync_elapsed, sync_rows = run_quick_sync()
+                if not check_task_disabled('FM Quick Sync'):
+                    print("")
+                    beautiful_log("Starting Quick Sync", 'info')
+                    sync_success, sync_elapsed, sync_rows = run_quick_sync()
 
             else:
                 logging.warning("⚠️ Collection failed - skipping analysis")
@@ -1911,7 +1915,7 @@ def run_market_hours(early_start=False):
         display_market_snapshot(collector)
 
         # Flow activity dashboard (running daily alert summary)
-        if scan_timestamp:
+        if scan_timestamp and not check_task_disabled('FM Alerts'):
             try:
                 from strategies.flow_monitor.fm_alert_summary import FMAlertSummary
                 alert_summary = FMAlertSummary()
@@ -1969,9 +1973,13 @@ def run_market_hours(early_start=False):
                 remaining = wait_seconds % 5
                 if remaining > 0 and not shutdown_event.is_set():
                     time.sleep(remaining)
-            else:
+            elif not check_task_disabled('FM Cycle Break'):
                 # Already past 9:30 — short coffee break
                 coffee_break(60, context='default')
+        elif cycle_success and check_task_disabled('FM Cycle Break'):
+            # Simple Mode: next cycle starts immediately. Failed cycles still get the
+            # 60s break below so a fast-failing outage can't spin in a tight loop.
+            pass
         else:
             # 60-second interruptible sleep with context-aware message
             coffee_context = 'sync_complete' if sync_success else 'default'
@@ -2053,20 +2061,29 @@ def run_post_market():
     # Collect sub-task results
     sub_tasks = {}
 
-    create_status_box(
-        "\U0001f306 POST-MARKET ANALYSIS",
-        [
-            "Task 1: Historical Backfill \u2014 Update price data for all symbols",
-            "Task 2: Market Regime Summary \u2014 Classify today's market behavior",
-            "Task 3: Symbol Rollup \u2014 Aggregate contract data to symbol level",
-            "Task 4: Daily Flow Aggregate \u2014 Materialize flow_daily_aggregates row",
-            "Task 5: Daily Evaluation \u2014 Score and evaluate today's scans",
-            "Task 6: Watchlist Cleanup \u2014 Archive expired watchlist entries",
-        ]
-    )
+    # Simple Mode (PRD 0014): historical backfill only
+    simple_post_market = check_task_disabled('FM Post-Market Analysis')
+    if simple_post_market:
+        total_tasks = 1
+        create_status_box(
+            "\U0001f306 POST-MARKET (SIMPLE MODE)",
+            ["Task 1: Historical Backfill \u2014 Update price data for all symbols"]
+        )
+    else:
+        create_status_box(
+            "\U0001f306 POST-MARKET ANALYSIS",
+            [
+                "Task 1: Historical Backfill \u2014 Update price data for all symbols",
+                "Task 2: Market Regime Summary \u2014 Classify today's market behavior",
+                "Task 3: Symbol Rollup \u2014 Aggregate contract data to symbol level",
+                "Task 4: Daily Flow Aggregate \u2014 Materialize flow_daily_aggregates row",
+                "Task 5: Daily Evaluation \u2014 Score and evaluate today's scans",
+                "Task 6: Watchlist Cleanup \u2014 Archive expired watchlist entries",
+            ]
+        )
 
     # Task 1: Historical backfill (moved from pre-market for fresh data)
-    _step_header(1, 6, "Historical Backfill")
+    _step_header(1, total_tasks, "Historical Backfill")
     backfill_result = run_historical_backfill(health_reporter)
     sub_tasks['backfill'] = backfill_result
 
@@ -2082,6 +2099,19 @@ def run_post_market():
             now_eastern().strftime('%Y-%m-%d %H:%M:%S'),
             backfill_result['duration_seconds'] / 60))
         total_errors += 1
+
+    if simple_post_market:
+        post_market_duration = time.time() - post_market_start
+        diag_logger.info("[{}] Post-market (simple mode) complete | Tasks: {}/1 successful".format(
+            now_eastern().strftime('%Y-%m-%d %H:%M:%S'), tasks_successful))
+        return {
+            'success': tasks_successful == total_tasks,
+            'duration_seconds': post_market_duration,
+            'tasks_successful': tasks_successful,
+            'tasks_total': total_tasks,
+            'errors': total_errors,
+            'sub_tasks': sub_tasks,
+        }
 
     # Task 2: Market regime summary (now runs after backfill)
     _step_header(2, 6, "Market Regime Summary")

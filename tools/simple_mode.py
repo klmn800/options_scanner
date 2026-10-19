@@ -34,23 +34,20 @@ SIMPLE_MODE_SKIPS = frozenset({
     'FM Pre-Market',
 
     # Flow Monitor market-hours cycle (collector, session stats, health
-    # reporter and diagnostic log still run)
+    # reporter, market snapshot and diagnostic log still run).
+    # FM Watchlist also covers news enrichment and dip detection (they run inside it).
+    # FM Alerts also covers email digests, X posting and the alert summary display.
     'FM Analyzer',
     'FM Alerts',
     'FM Watchlist',
-    'FM News Enrichment',
-    'FM Dip Detection',
     'FM Earnings Signals',
     'FM Intraday Trade Ingest',
     'FM Quick Sync',
-    'FM Cycle Break',
+    'FM Cycle Break',  # successful cycles only; failed cycles keep the 60s break
 
-    # Flow Monitor post-market (historical backfill still runs)
-    'Evening Market Regime Summary',
-    'Symbol Rollup',
-    'Daily Flow Aggregate',
-    'Daily Evaluation',
-    'Watchlist Cleanup',
+    # Flow Monitor post-market: regime summary, symbol rollup, daily aggregate,
+    # evaluation, watchlist cleanup / news backfill (historical backfill still runs)
+    'FM Post-Market Analysis',
 })
 
 _enabled = False
