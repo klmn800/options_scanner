@@ -36,8 +36,9 @@ nul
 *.log
 oracle/oracle_logs/
 
-# Batchfix backups
+# Batchfix / autofix backups (pre-edit safety copies made by Autofix sessions)
 *.batchfix_backup_*.py
+*.autofix_backup_*.py
 
 # Autofix error queue (transient)
 autofix/errors/

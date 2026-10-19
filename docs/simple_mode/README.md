@@ -8,16 +8,36 @@ email and as few moving parts as possible. Analysis can be done later from the s
 
 Simple Mode is an option, not a replacement. Without `--simple-mode`, `main.py` behaves exactly as before.
 
+## Status
+
+| Date | Change |
+|------|--------|
+| 2026-10-19 | Built and verified (stubbed dry runs, headless launcher test, tray tests). Last full-mode day. |
+| 2026-10-20 | **Trial starts.** `\!main.py (Simple Mode)` enabled, `\!main.py` (full) disabled. |
+
+**Why:** Ben no longer uses the scanner day to day. Its lasting value is the intraday option snapshots, which
+can't be bought affordably, so the goal is to keep collecting them unattended with as few moving parts as
+possible. Dropping the per-cycle quick sync (~80s) and the 60s break should give ~20-25% more snapshots per
+day (an estimate from 10-15's cycle averages; the trial will measure it).
+
+**Trial review:** after each trial day, check the log, cycle count vs the ~33-cycle full-mode baseline, the
+evening Option Pipeline and the daily backup (tray health window, last 5 days panel). Then Ben decides whether
+Simple Mode stays the scheduled default.
+
 ## Switching modes
 
-Which mode runs is decided by what the Task Scheduler task `\!main.py` (6:35 AM weekdays) launches:
+Two Task Scheduler tasks share the 6:35 AM weekday trigger. **Enable exactly one:**
 
-| Mode | Task action | What you see |
-|------|-------------|--------------|
-| Full | `E:\options_scanner\scheduled_tasks\start_main.bat` | Windows Terminal tab "Options Scanner" |
-| Simple | `wscript.exe "E:\options_scanner\scheduled_tasks\start_main_simple.vbs"` | Nothing (tray dot only) |
+| Task | Mode | Action | What you see |
+|------|------|--------|--------------|
+| `\!main.py` | Full | `E:\options_scanner\scheduled_tasks\start_main.bat` | Windows Terminal tab "Options Scanner" |
+| `\!main.py (Simple Mode)` | Simple | `wscript.exe "E:\options_scanner\scheduled_tasks\start_main_simple.vbs"` | Nothing (tray dot only) |
 
-To switch, edit the task's action in Task Scheduler. Nothing else changes. The change takes effect at the next 6:35 run.
+To switch, disable one and enable the other in Task Scheduler. It takes effect at the next 6:35 run. If both
+are enabled, both fire, the first `main.py` to start wins and the other exits ("already running"), so the mode
+would be a coin toss.
+
+Options Scanner task names start with `!` so they sort to the top of Task Scheduler.
 
 Manual runs:
 

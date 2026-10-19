@@ -25,6 +25,36 @@ This repo is **PUBLIC** at `github.com/klmn800/options_scanner` (read-only showc
 ---
 
 
+## CURRENT OPERATING MODE: Simple Mode trial (from 2026-10-20)
+
+**What:** Starting Tuesday 2026-10-20, the daily cycle runs in **Simple Mode**: headless and collection-only
+(`main.py --simple-mode`, PRD 0014, `docs/simple_mode/README.md`). Flow Monitor collects `flow_options_scans`
+all day; the evening Option Pipeline, backups, Friday sector archive, Autofix and performance collection still run.
+Analysis, alerts, watchlist, news, email/X posting, morning OP, Earnings Intel, the Trading Advisor launch and
+**all query-DB syncs are off**.
+
+**Why:** Ben no longer uses the scanner day to day. Its lasting value is the intraday option snapshots, which no
+affordable historical source provides. Simple Mode keeps collecting them unattended with fewer moving parts
+(and ~20-25% more snapshots per day, from dropping the per-cycle sync and break). Analysis can be done later
+from the stored data. Decided with Ben 2026-10-16 to 10-19.
+
+**How it's scheduled:** two Task Scheduler tasks, only one enabled at a time:
+- `\!main.py (Simple Mode)` runs `wscript.exe "...\scheduled_tasks\start_main_simple.vbs"` (weekdays 6:35). **Enabled.**
+- `\!main.py` runs `scheduled_tasks\start_main.bat`, the full system. **Disabled by Ben** for the trial, kept to switch back.
+
+To switch modes, enable one task and disable the other. Status: **trial**. Ben reviews the first days, then
+decides whether Simple Mode stays the default. Update this section when that changes.
+
+**What it means for a Claude session:**
+- `datalake_query.db` is **frozen** at 2026-10-19 (last full-mode sync). For current data, query
+  `data/datalake.db` read-only (`--db data/datalake.db`), or ask Ben before one manual after-hours `--sync`.
+- No new `flow_alerts`, watchlist, `flow_symbol_summary` or `flow_daily_aggregates` rows; analyzer columns in
+  `flow_options_scans` are NULL. This is by design, not a data-quality failure.
+- Health at a glance: tray dot (`tools/simple_mode_tray.py`) or `python tools/simple_mode_tray.py --status`.
+- Autofix restarts the mode that crashed (`run_mode` in `logs/daily_state.json`).
+
+---
+
 ## CRITICAL: DATABASE SYNC RESTRICTION
 
 **NEVER run `python data/health/db_backup.py --sync` without explicit user approval.** This is a full file-level copy that interrupts live FM writes. Always explain why, ask, and wait for YES. The restriction applies only to **manual** invocation of the full sync during market hours — the automated tiers below run safely on their own.
@@ -259,7 +289,7 @@ Use `from tools.decimal_formatter import clean_database_row` before all INSERT/U
 
 Single daily cycle, launched by Task Scheduler every weekday. Holiday detection via Tradier API.
 
-**Simple Mode** (`--simple-mode`, PRD 0014): headless, collection-only. Runs only 2 FM (collector + post-market historical backfill), 3.2 Evening OP, 4.1/4.2, Friday 5.1/5.4, and 6.1. Which mode runs is chosen by what `\!main.py` launches: `start_main.bat` (full) or `start_main_simple.vbs` (simple). Fixed skip list: `tools/simple_mode.py`. Details: `docs/simple_mode/README.md`.
+**Simple Mode** (`--simple-mode`, PRD 0014): headless, collection-only. Runs only 2 FM (collector + post-market historical backfill), 3.2 Evening OP, 4.1/4.2, Friday 5.1/5.4, and 6.1. Which mode runs is chosen by which Task Scheduler task is enabled: `\!main.py` (full, `start_main.bat`) or `\!main.py (Simple Mode)` (`start_main_simple.vbs`). Enable only one. Fixed skip list: `tools/simple_mode.py`. Details: `docs/simple_mode/README.md`.
 
 **Backup & archive details:** `docs/CLAUDE_REFERENCE.md`.
 
