@@ -18,7 +18,9 @@ Sources:
     logs/daily_state.json            today's FM session (rewritten after every cycle)
     cache/market_calendar_*.json     trading days + close times (refreshed by main.py)
     data/performance.db (read-only)  daily history for the weekly panel
-    data/datalake.db (read-only)     row-count cross-check, health window only
+
+It never opens datalake.db: rows today come from the FM session totals (verified
+equal to the flow_options_scans count on 2026-10-19).
 
 Usage:
     pythonw tools/simple_mode_tray.py                       # tray icon (start at login)
@@ -43,7 +45,6 @@ from tools.timezone_utils import now_eastern  # noqa: E402
 DAILY_STATE = os.path.join(ROOT, 'logs', 'daily_state.json')
 CALENDAR_CACHE = os.path.join(ROOT, 'cache', 'market_calendar_calendar_2m.json')
 PERFORMANCE_DB = os.path.join(ROOT, 'data', 'performance.db')
-DATALAKE_DB = os.path.join(ROOT, 'data', 'datalake.db')
 LOG_DIR = os.path.join(ROOT, 'logs')
 
 STALE_MINUTES = 30          # red after this long without a completed cycle
@@ -187,7 +188,7 @@ def tooltip(st):
 
 # ── Health panels ─────────────────────────────────────────────────────────
 
-def today_panel(st, include_db_count=True):
+def today_panel(st):
     fm, now = st['fm'], st['now']
     lines = ['TODAY  {}'.format(now.strftime('%a %Y-%m-%d %H:%M ET')),
              '  State:          {} - {}'.format(st['state'].upper(), st['headline']),
@@ -219,24 +220,8 @@ def today_panel(st, include_db_count=True):
     errors = {k: v for k, v in (fm.get('errors_by_type') or {}).items() if v}
     lines.append('  Errors:         {}'.format(
         ', '.join('{} {}'.format(v, k) for k, v in errors.items()) if errors else 'none'))
-    rows_line = '  Rows today:     {:,}'.format(st['rows_today'])
-    if include_db_count:
-        rows_line += '  (database: {})'.format(_db_rows_today(now.strftime('%Y-%m-%d')))
-    lines.append(rows_line)
+    lines.append('  Rows today:     {:,}'.format(st['rows_today']))
     return lines
-
-
-def _db_rows_today(date_str):
-    try:
-        conn = _connect_ro(DATALAKE_DB)
-        try:
-            n = conn.execute('SELECT COUNT(*) FROM flow_options_scans WHERE trade_date = ?',
-                             (date_str,)).fetchone()[0]
-        finally:
-            conn.close()
-        return '{:,}'.format(n)
-    except sqlite3.Error as e:
-        return 'unavailable ({})'.format(e)
 
 
 def previous_trading_days(now, calendar, count=5):
@@ -286,8 +271,8 @@ def week_panel(now, calendar):
     return lines
 
 
-def render(st, calendar, include_db_count=True):
-    return '\n'.join(today_panel(st, include_db_count) + [''] + week_panel(st['now'], calendar))
+def render(st, calendar):
+    return '\n'.join(today_panel(st) + [''] + week_panel(st['now'], calendar))
 
 
 # ── Tray GUI ──────────────────────────────────────────────────────────────
