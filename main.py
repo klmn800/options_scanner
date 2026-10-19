@@ -397,6 +397,14 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
 
         self.create_status_box(title, status_lines, success=(failed == 0))
 
+    def _skip_step(self, results, step_name):
+        """Mark step_name 'skipped' if Simple Mode skips it (PRD 0014). Returns True when skipped."""
+        if simple_mode.should_skip(step_name):
+            self.beautiful_log("{}: skipped (simple mode)".format(step_name), 'info')
+            results[step_name] = 'skipped'
+            return True
+        return False
+
     def run_daily_cycle(self):
         """Run one complete daily trading cycle then exit. Launched by Task Scheduler."""
 
@@ -424,9 +432,12 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         now = now_eastern()
         is_friday = now.weekday() == 4
 
-        # After 9:00 AM → Skip directly to Flow Monitor (Phase 2)
-        if now.hour >= 9:
-            self.beautiful_log("Mid-day start ({}) - skipping to Phase 2".format(now.strftime("%I:%M %p")), 'phase')
+        # After 9:00 AM (or Simple Mode) → Skip directly to Flow Monitor (Phase 2)
+        if now.hour >= 9 or simple_mode.is_simple_mode():
+            if simple_mode.is_simple_mode():
+                self.beautiful_log("Simple Mode - skipping Phase 1 pre-market operations", 'phase')
+            else:
+                self.beautiful_log("Mid-day start ({}) - skipping to Phase 2".format(now.strftime("%I:%M %p")), 'phase')
             for key in ['1.1 Morning Option Pipeline', '1.2 Earnings Intelligence',
                         '1.3 Metadata Collection', '1.4 Trade Ingest',
                         '1.5 Query Sync (Morning)']:
@@ -488,11 +499,12 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         self.phase_header("POST-MARKET OPERATIONS", phase_number=3)
 
         # Step 3.1: Trade Ingest (catches all intraday fills)
-        self.coffee_break(60, "Taking a well-deserved break", after_step="Flow Monitor")
-        self.beautiful_log("Step 3.1: Trade Ingest (Post-Market)", 'phase')
-        _t0 = time.time()
-        results['3.1 Trade Ingest'] = self.run_trade_ingest()
-        step_durations['3.1 Trade Ingest'] = time.time() - _t0
+        if not self._skip_step(results, '3.1 Trade Ingest'):
+            self.coffee_break(60, "Taking a well-deserved break", after_step="Flow Monitor")
+            self.beautiful_log("Step 3.1: Trade Ingest (Post-Market)", 'phase')
+            _t0 = time.time()
+            results['3.1 Trade Ingest'] = self.run_trade_ingest()
+            step_durations['3.1 Trade Ingest'] = time.time() - _t0
 
         # Step 3.2: Evening Option Pipeline (volume-enriched data)
         self.coffee_break(60, "Quick breather before evening pipeline", after_step="Trade Ingest (Post-Market)")
@@ -503,16 +515,19 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
 
 
         # Step 3.4: Query Database Sync (Final)
-        self.beautiful_log("Step 3.4: Query Database Sync (Final)", 'phase')
-        _t0 = time.time()
-        results['3.4 Query Sync (Final)'] = self.run_query_database_sync()
-        step_durations['3.4 Query Sync (Final)'] = time.time() - _t0
+        final_sync_skipped = self._skip_step(results, '3.4 Query Sync (Final)')
+        if not final_sync_skipped:
+            self.beautiful_log("Step 3.4: Query Database Sync (Final)", 'phase')
+            _t0 = time.time()
+            results['3.4 Query Sync (Final)'] = self.run_query_database_sync()
+            step_durations['3.4 Query Sync (Final)'] = time.time() - _t0
 
         # ── Phase 4: Evening Operations ──
         self.phase_header("EVENING OPERATIONS", phase_number=4)
 
         # Step 4.1: Database Backup - Daily
-        self.coffee_break(60, "Final sync complete - waiting for lock release before backup", after_step="Query Database Sync (Final)")
+        if not final_sync_skipped:
+            self.coffee_break(60, "Final sync complete - waiting for lock release before backup", after_step="Query Database Sync (Final)")
         self.beautiful_log("Step 4.1: Database Backup (Daily)", 'phase')
         _t0 = time.time()
         results['4.1 Daily Backup'] = self.run_database_backup()
@@ -561,20 +576,24 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
                          weekly_backup_thread.ident)
 
             # Step 5.2: FM Baseline Update
-            self.beautiful_log("Step 5.2: FM Baseline Update (Friday)", 'phase')
-            _t0 = time.time()
-            results['5.2 FM Baseline'] = self.run_fm_baseline_update()
-            step_durations['5.2 FM Baseline'] = time.time() - _t0
+            if not self._skip_step(results, '5.2 FM Baseline'):
+                self.beautiful_log("Step 5.2: FM Baseline Update (Friday)", 'phase')
+                _t0 = time.time()
+                results['5.2 FM Baseline'] = self.run_fm_baseline_update()
+                step_durations['5.2 FM Baseline'] = time.time() - _t0
 
             # Step 5.3: Weekly Earnings Calendar Refresh
-            self.coffee_break(60, "Baseline update complete - lock release before earnings refresh", after_step="FM Baseline Update")
-            self.beautiful_log("Step 5.3: Earnings Calendar Refresh (Friday)", 'phase')
-            _t0 = time.time()
-            results['5.3 Earnings Refresh'] = self.run_earnings_weekly_refresh()
-            step_durations['5.3 Earnings Refresh'] = time.time() - _t0
+            earnings_refresh_skipped = self._skip_step(results, '5.3 Earnings Refresh')
+            if not earnings_refresh_skipped:
+                self.coffee_break(60, "Baseline update complete - lock release before earnings refresh", after_step="FM Baseline Update")
+                self.beautiful_log("Step 5.3: Earnings Calendar Refresh (Friday)", 'phase')
+                _t0 = time.time()
+                results['5.3 Earnings Refresh'] = self.run_earnings_weekly_refresh()
+                step_durations['5.3 Earnings Refresh'] = time.time() - _t0
 
             # Step 5.4: Sector Archive Operations
-            self.coffee_break(60, "Earnings refresh complete - lock release before archive", after_step="Earnings Calendar Refresh")
+            if not earnings_refresh_skipped:
+                self.coffee_break(60, "Earnings refresh complete - lock release before archive", after_step="Earnings Calendar Refresh")
             self.beautiful_log("Step 5.4: Sector Archive Operations (Friday)", 'phase')
             _t0 = time.time()
             results['5.4 Sector Archive'] = self.run_friday_sector_archive()
@@ -611,10 +630,11 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         step_durations['6.1 Performance Collection'] = time.time() - _t0
 
         # Step 6.2: Symbol Health Check
-        self.beautiful_log("Step 6.2: Symbol Health Check", 'phase')
-        _t0 = time.time()
-        results['6.2 Symbol Health'] = self.run_symbol_health_check()
-        step_durations['6.2 Symbol Health'] = time.time() - _t0
+        if not self._skip_step(results, '6.2 Symbol Health'):
+            self.beautiful_log("Step 6.2: Symbol Health Check", 'phase')
+            _t0 = time.time()
+            results['6.2 Symbol Health'] = self.run_symbol_health_check()
+            step_durations['6.2 Symbol Health'] = time.time() - _t0
 
         # ── Day-End Summary ──
         self._print_day_summary(results, day_start_time, step_durations)

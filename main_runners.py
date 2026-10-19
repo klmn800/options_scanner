@@ -45,6 +45,7 @@ from timezone_utils import now_eastern, eastern_date_string
 from tools.autofix import queue_error
 from tools.log_utils import log_to_file
 from main_ui import _save_sync_performance
+from tools import simple_mode
 
 # Import strategy components (used by runners)
 # Note: OPOrchestrator class name is legacy - it runs the Option Pipeline
@@ -446,6 +447,12 @@ class OrchestratorRunnersMixin:
                     now.strftime("%I:%M %p")), 'phase')
                 pre_market_result = {'success': True, 'skipped': True, 'alerts_resolved': 0, 'symbols_updated': 0}
                 # Skip directly to post-market phase
+            elif simple_mode.should_skip('FM Pre-Market'):
+                # Simple Mode (PRD 0014): no alert resolution, sentiment, pre-market sync,
+                # or Trading Advisor launch (2.2) - straight to the 9:15 wait
+                self.beautiful_log("Simple Mode - skipping FM pre-market preparation and Trading Advisor", 'phase')
+                simple_mode.should_skip('2.2 Trading Advisor')
+                pre_market_result = {'success': True, 'skipped': True, 'alerts_resolved': 0, 'symbols_updated': 0}
             else:
                 # Pre-market prep runs immediately after Phase 1 (no time gate)
                 # Market hours monitoring has its own 9:30 AM wait downstream
@@ -1908,7 +1915,7 @@ class OrchestratorRunnersMixin:
     def _eod_symbol_health(self, results):
         """Section 5: Symbol Health — only shown when there are warnings/suspects/changes."""
         health = results.get('6.2 Symbol Health', {})
-        if not health or not health.get('success'):
+        if not isinstance(health, dict) or not health.get('success'):
             return
 
         if health.get('safety_gate_tripped'):
