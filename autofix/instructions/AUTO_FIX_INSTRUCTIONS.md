@@ -291,12 +291,12 @@ Run `assess_restart_situation()` and use your judgment:
 
 - **Main.py not running:**
   - CRITICAL errors exit immediately (by design)
-  - Just restart: `start python main.py`
+  - Just restart with the restart command for today's mode (see 3. below)
   - No kill step needed (already dead)
 
 - **Main.py running + safe to restart:**
   - Kill current process: `taskkill /PID <current_pid> /F`
-  - Then restart: `start python main.py`
+  - Then restart with the restart command for today's mode (see 3. below)
   - Ignore stale PID from prompt - use current_pid from assessment
 
 - **Main.py running + NOT safe to restart (critical ops):**
@@ -305,13 +305,18 @@ Run `assess_restart_situation()` and use your judgment:
   - Note in report: "Testing skipped - {reason}"
 
 **3. Restart guidelines:**
-- **ALWAYS use**: `start python main.py` (creates new visible window)
+- **Restart in the same mode that crashed.** Read `run_mode` from `logs/daily_state.json`:
+  - `"simple"` (Simple Mode, headless, PRD 0014): `wscript scheduled_tasks\start_main_simple.vbs`
+    (no window opens; that is expected)
+  - `"full"` or missing: `start python main.py` (creates new visible window)
 - **NEVER use**: `python main.py` directly (blocks your session)
 - **NEVER use**: Component flags like `--flow-monitor` (main.py auto-resumes)
 - System automatically picks up where it left off
 
 **4. Quick verification (if you restarted):**
 - Monitor logs for 30-60 seconds - confirm no immediate crash
+- Simple Mode has no window to watch: confirm the process is up (`assess_restart_situation()` shows
+  a main.py PID) and tail today's `logs/orchestrator_YYYY-MM-DD.log` / `logs/flow_monitor_YYYY-MM-DD.log`
 - **STOP WATCHING** - your job is done
 - If error recurs later, new autofix instance spawns
 
@@ -622,7 +627,7 @@ You are an **autonomous repair agent** with full authority to fix production iss
 1. ✅ Root cause identified and fixed
 2. ✅ Situation assessed using `assess_restart_situation()`
 3. ✅ Intelligent restart decision made based on actual state (not stale PID)
-4. ✅ Main.py restarted if needed (`start python main.py`)
+4. ✅ Main.py restarted if needed, in the mode that crashed (see Restart guidelines)
 5. ✅ Changes documented in journal AND detailed report (logs/claude_fixes_*.md)
 6. ✅ Email report sent
 7. ✅ Batch mode logged (if CRITICAL error - Step 6)

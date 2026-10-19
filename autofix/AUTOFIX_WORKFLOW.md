@@ -125,7 +125,8 @@ flowchart TD
 ## Restart Behavior
 
 **main.py is self-healing and workflow-aware:**
-- Always restart with `start python main.py` (no arguments needed)
+- Always restart with `start python main.py` (no arguments needed), or, when `logs/daily_state.json`
+  says `"run_mode": "simple"`, with `wscript scheduled_tasks\start_main_simple.vbs` (headless, PRD 0014)
 - System automatically resumes at the correct point in the daily cycle
 - No component-specific flags required (`--flow-monitor`, `--oid-morning`, etc.)
 - Designed for frequent start/stop during development and production
