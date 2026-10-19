@@ -267,14 +267,32 @@ class OrchestratorUIMixin:
 
 # ── Daily State Persistence ──────────────────────────────────────────────
 # Persists FM session stats, sync performance, and news API usage to a JSON
-# file. Read at end-of-day by performance writer. Overwritten at the start
-# of each daily cycle.
+# file. Read at end-of-day by performance writer. Created fresh at the start
+# of each daily cycle, but kept when main.py restarts mid-day (Autofix) so
+# the morning's FM cycles aren't lost.
+#
+# The state belongs to the trading day the cycle started on, not the wall
+# clock: Friday cycles run past midnight, and comparing against now_eastern()
+# made Phase 6 miss Friday's FM data. run_daily_cycle() pins the date with
+# _set_cycle_date(); standalone runs fall back to today.
 
 DAILY_STATE_PATH = os.path.join(project_root, 'logs', 'daily_state.json')
+_cycle_date = None
+
+
+def _set_cycle_date(date_str):
+    """Pin the trading day this process's daily state belongs to."""
+    global _cycle_date
+    _cycle_date = date_str
+
+
+def _state_date():
+    """Trading day for daily_state.json: the pinned cycle date, else today."""
+    return _cycle_date or now_eastern().strftime('%Y-%m-%d')
 
 
 def _reset_daily_state(date_str):
-    """Overwrite daily_state.json with empty structure. Called at start of each daily cycle."""
+    """Overwrite daily_state.json with empty structure. Called at the start of a new trading day."""
     from tools.simple_mode import run_mode
     state = {'date': date_str, 'run_mode': run_mode(), 'fm_session': {}}
     os.makedirs(os.path.dirname(DAILY_STATE_PATH), exist_ok=True)
@@ -283,11 +301,11 @@ def _reset_daily_state(date_str):
 
 
 def _load_daily_state():
-    """Load daily_state.json. Returns None if file missing or date doesn't match today."""
+    """Load daily_state.json. Returns None if file missing or date doesn't match the trading day."""
     try:
         with open(DAILY_STATE_PATH, 'r') as f:
             state = json.load(f)
-        if state.get('date') == now_eastern().strftime('%Y-%m-%d'):
+        if state.get('date') == _state_date():
             return state
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
         pass
@@ -301,7 +319,7 @@ def _save_run_mode():
     """
     from tools.simple_mode import run_mode
     state = _load_daily_state() or {
-        'date': now_eastern().strftime('%Y-%m-%d'),
+        'date': _state_date(),
         'fm_session': {},
     }
     state['run_mode'] = run_mode()
@@ -313,7 +331,7 @@ def _save_run_mode():
 def _save_fm_session(session_dict):
     """Update FM session stats in daily_state.json. Called after each FM cycle."""
     state = _load_daily_state() or {
-        'date': now_eastern().strftime('%Y-%m-%d'),
+        'date': _state_date(),
         'fm_session': {},
     }
     state['fm_session'] = session_dict
@@ -334,7 +352,7 @@ def _save_sync_performance(sync_type, duration_seconds, size_display=None, pages
         success: Whether the sync succeeded
     """
     state = _load_daily_state() or {
-        'date': now_eastern().strftime('%Y-%m-%d'),
+        'date': _state_date(),
         'fm_session': {},
     }
     if 'sync_performance' not in state:
@@ -372,7 +390,7 @@ def _save_news_api_usage(source, api_calls=0, symbols_enriched=0, zero_article_c
         zero_article_calls: Calls that returned no usable data (wasted budget)
     """
     state = _load_daily_state() or {
-        'date': now_eastern().strftime('%Y-%m-%d'),
+        'date': _state_date(),
         'fm_session': {},
     }
     if 'news_api_usage' not in state:

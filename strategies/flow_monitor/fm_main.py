@@ -1487,7 +1487,9 @@ def run_market_hours(early_start=False):
     # Session stats accumulator — restore from daily_state.json if restarted mid-day
     stats = FMSessionStats.load_from_daily_state()
 
-    cycle = 1
+    # Continue numbering after restored cycles - record_cycle() sets total_cycles
+    # from cycle_num, so restarting at 1 would undercount the day
+    cycle = stats.total_cycles + 1
     closing_scan_done = False
     pre_open_scan_done = False
     last_cycle_start_time = None

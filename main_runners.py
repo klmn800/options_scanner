@@ -2815,7 +2815,7 @@ class OrchestratorRunnersMixin:
         perf_start = time.time()
         try:
             from tools.performance_writer import write_daily_performance
-            from main_ui import _load_daily_state
+            from main_ui import _load_daily_state, _state_date
 
             # Read daily state for FM session data, sync entries, and news API usage
             daily_state = _load_daily_state() or {}
@@ -2823,8 +2823,8 @@ class OrchestratorRunnersMixin:
             sync_entries = daily_state.get('sync_performance', [])
             news_api_data = daily_state.get('news_api_usage', {})
 
-            # Get today's trade date
-            trade_date = now_eastern().strftime('%Y-%m-%d')
+            # Trading day the cycle started on (Friday cycles finish after midnight)
+            trade_date = _state_date()
 
             # Write all performance data (ensure_schema called internally)
             result = write_daily_performance(

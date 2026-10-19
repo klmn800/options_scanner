@@ -85,7 +85,8 @@ from timezone_utils import now_eastern, eastern_date_string, set_simulated_time
 from tools.autofix import queue_error
 
 # Import mixin classes for modular orchestrator
-from main_ui import OrchestratorUIMixin, _reset_daily_state, _save_run_mode
+from main_ui import (OrchestratorUIMixin, _reset_daily_state, _save_run_mode,
+                     _set_cycle_date, _load_daily_state)
 from tools import simple_mode
 from main_calendar import OrchestratorCalendarMixin
 from main_runners import OrchestratorRunnersMixin
@@ -426,7 +427,14 @@ class CleanOrchestrator(OrchestratorUIMixin, OrchestratorCalendarMixin, Orchestr
         date_str = now_eastern().strftime('%Y-%m-%d')
         results = {}
         step_durations = {}
-        _reset_daily_state(date_str)
+        # Keep today's state on a mid-day restart (Autofix) so the morning's FM
+        # cycles survive; start fresh on a new trading day.
+        _set_cycle_date(date_str)
+        if _load_daily_state() is None:
+            _reset_daily_state(date_str)
+        else:
+            self.beautiful_log("Restart detected - keeping today's daily state", 'info')
+        _save_run_mode()
 
         # Timing router: Determine where to start based on current time
         now = now_eastern()
@@ -739,7 +747,6 @@ def main():
         # Simple Mode (PRD 0014) - must be before any step runs
         if args.simple_mode:
             simple_mode.enable()
-            _save_run_mode()
             print("SIMPLE MODE: collection-only daily cycle")
             print()
 
