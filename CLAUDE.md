@@ -37,9 +37,11 @@ The query DB (`datalake_query.db`) is kept current by three tiers that run autom
 
 2. **Pre-market targeted sync** (`sync_pre_market_updates` in `db_backup.py`, ~line 1781). Runs pre-open. UPDATEs specific columns on existing rows that the quick sync's `INSERT OR IGNORE` can't reach: `flow_alerts.{next_day_oi, oi_resolution, oi_change_contracts, oi_change_pct, resolved_at}` and `flow_watchlist_daily.{alert_sentiment, building_alerts_count, closing_alerts_count}`.
 
-3. **Full sync** (`db_backup.py --sync`). Runs automatically as Phase 4.1 of the daily pipeline (`run_database_backup` in `main_runners.py`, ~line 2284). File-level copy; propagates everything NOT covered by quick sync (`earnings_events`, `earnings_moves`, `earnings_upcoming`, `earnings_snapshots`, `historical_prices`, `option_contracts`, `symbol_*`, etc.). This is the sync that the manual-invocation restriction above protects — during market hours it would interrupt live writes. The daily pipeline runs it at a safe time (post-close).
+3. **Full sync** (`db_backup.py --sync --auto`). Runs automatically as steps 1.5 (morning) and 3.4 (final, after the evening Option Pipeline) of the daily pipeline (`run_query_database_sync` in `main_runners.py`, ~line 2362). Phase 4.1 is the daily *backup* (`db_backup.py --disaster`), not a sync. File-level copy; propagates everything NOT covered by quick sync (`earnings_events`, `earnings_moves`, `earnings_upcoming`, `earnings_snapshots`, `historical_prices`, `option_contracts`, `symbol_*`, etc.). This is the sync that the manual-invocation restriction above protects — during market hours it would interrupt live writes. The daily pipeline runs it at a safe time (post-close).
 
-In normal operation the query DB is kept current automatically. Lag only appears if the daily pipeline did not run that day or if a write landed after that day's Phase 4.1 sync. See `autofix/reference/AUTOFIX_CHEAT_SHEET.md` section "Database Sync Architecture Context" for deeper detail on WAL checkpoint behavior and PRAGMA reasoning.
+In normal operation the query DB is kept current automatically. Lag only appears if the daily pipeline did not run that day or if a write landed after that day's step 3.4 sync.
+
+**Simple Mode turns all three tiers off** (`main.py --simple-mode`, see `docs/simple_mode/README.md`). On Simple Mode days `datalake_query.db` is a frozen snapshot from the last full-mode day; query `data/datalake.db` read-only, or ask Ben before running one manual after-hours `--sync`. See `autofix/reference/AUTOFIX_CHEAT_SHEET.md` section "Database Sync Architecture Context" for deeper detail on WAL checkpoint behavior and PRAGMA reasoning.
 
 ---
 
@@ -65,6 +67,12 @@ python main.py --earnings-intel     # Earnings Intelligence pipeline
 python main.py --trade-ingest       # Parse Robinhood emails
 python main.py --database-backup    # Database backup phase
 python main.py --simulate-time 06:35  # Pretend it's 6:35 AM (auto-expires 4h)
+python main.py --simple-mode        # Collection-only daily cycle (PRD 0014, docs/simple_mode/README.md)
+wscript scheduled_tasks\start_main_simple.vbs  # Same, headless (Task Scheduler / Autofix restart)
+
+# Simple Mode tray heartbeat (starts at sign-in via Startup-folder shortcut)
+pythonw tools/simple_mode_tray.py           # Tray icon + health window
+python tools/simple_mode_tray.py --status   # Print state + health panels, no GUI
 
 # Strategy-specific
 python strategies/flow_monitor/fm_main.py --pre-market --no-interaction
@@ -251,12 +259,15 @@ Use `from tools.decimal_formatter import clean_database_row` before all INSERT/U
 
 Single daily cycle, launched by Task Scheduler every weekday. Holiday detection via Tradier API.
 
+**Simple Mode** (`--simple-mode`, PRD 0014): headless, collection-only. Runs only 2 FM (collector + post-market historical backfill), 3.2 Evening OP, 4.1/4.2, Friday 5.1/5.4, and 6.1. Which mode runs is chosen by what `\!main.py` launches: `start_main.bat` (full) or `start_main_simple.vbs` (simple). Fixed skip list: `tools/simple_mode.py`. Details: `docs/simple_mode/README.md`.
+
 **Backup & archive details:** `docs/CLAUDE_REFERENCE.md`.
 
 ### Key Architectural Facts
 - Symbol universe: ~820 active symbols in `core/symbols_klmn800.py`. Use `symbol_lifecycle.py` to add/remove.
 - Orchestrator order: 1.1 OP → 1.2 EI → 1.3 Meta → 1.4 TradeIngest → 1.5 Sync → 2. FM → 3.1 TradeIngest → 3.2 OP → 3.4 Sync → 4.1 Backup → 4.2 Autofix → 5.x Friday → 6.1 Perf
 - `run_*()` in `main_runners.py` return structured dicts (`{'success': bool, ...}`), not bools
+- `logs/daily_state.json` belongs to the cycle's trading day (`_set_cycle_date` in `main_ui.py`), survives mid-day restarts, and records `run_mode` (`simple`/`full`) so Autofix restarts the mode that crashed
 
 ---
 
