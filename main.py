@@ -85,7 +85,8 @@ from timezone_utils import now_eastern, eastern_date_string, set_simulated_time
 from tools.autofix import queue_error
 
 # Import mixin classes for modular orchestrator
-from main_ui import OrchestratorUIMixin, _reset_daily_state
+from main_ui import OrchestratorUIMixin, _reset_daily_state, _save_run_mode
+from tools import simple_mode
 from main_calendar import OrchestratorCalendarMixin
 from main_runners import OrchestratorRunnersMixin
 
@@ -670,6 +671,8 @@ Testing with Time Simulation (auto-expires after 4 hours by default):
                        help='Simulate specific time for testing (e.g., "06:35" for morning Option Pipeline trigger)')
     parser.add_argument('--simulate-ttl', type=float, metavar='HOURS', default=4.0,
                        help='Auto-expire simulated time after N hours (default: 4.0, use 0 for no expiry)')
+    parser.add_argument('--simple-mode', action='store_true',
+                       help='Collection-only daily cycle: FM collection, evening OP, backups, archive (PRD 0014)')
 
     return parser.parse_args()
 
@@ -712,6 +715,13 @@ def main():
                 print("Invalid --simulate-time format: {}".format(e))
                 print("   Expected format: HH:MM (e.g., '06:35', '17:00')")
                 return 1
+
+        # Simple Mode (PRD 0014) - must be before any step runs
+        if args.simple_mode:
+            simple_mode.enable()
+            _save_run_mode()
+            print("SIMPLE MODE: collection-only daily cycle")
+            print()
 
         # Initialize orchestrator
         orchestrator = CleanOrchestrator()

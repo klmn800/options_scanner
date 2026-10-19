@@ -275,7 +275,8 @@ DAILY_STATE_PATH = os.path.join(project_root, 'logs', 'daily_state.json')
 
 def _reset_daily_state(date_str):
     """Overwrite daily_state.json with empty structure. Called at start of each daily cycle."""
-    state = {'date': date_str, 'fm_session': {}}
+    from tools.simple_mode import run_mode
+    state = {'date': date_str, 'run_mode': run_mode(), 'fm_session': {}}
     os.makedirs(os.path.dirname(DAILY_STATE_PATH), exist_ok=True)
     with open(DAILY_STATE_PATH, 'w') as f:
         json.dump(state, f, indent=2)
@@ -291,6 +292,22 @@ def _load_daily_state():
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
         pass
     return None
+
+
+def _save_run_mode():
+    """Record this run's mode ('simple' / 'full') in daily_state.json.
+
+    Autofix reads it to restart the same mode that crashed (PRD 0014).
+    """
+    from tools.simple_mode import run_mode
+    state = _load_daily_state() or {
+        'date': now_eastern().strftime('%Y-%m-%d'),
+        'fm_session': {},
+    }
+    state['run_mode'] = run_mode()
+    os.makedirs(os.path.dirname(DAILY_STATE_PATH), exist_ok=True)
+    with open(DAILY_STATE_PATH, 'w') as f:
+        json.dump(state, f, indent=2)
 
 
 def _save_fm_session(session_dict):

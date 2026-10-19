@@ -779,17 +779,16 @@ def log_diagnostic_summary(diag_logger, storage, scan_timestamp, symbols_attempt
 # Health status tracking moved to FMHealthReporter class
 
 def check_task_disabled(task_name):
-    """Check if task is disabled via emergency override in config
-    
+    """Check if task is skipped in Simple Mode (PRD 0014)
+
     Args:
-        task_name: Name of task to check
-        
+        task_name: Name of task to check (see tools/simple_mode.SIMPLE_MODE_SKIPS)
+
     Returns:
-        bool: True if task should be skipped
+        bool: True if task should be skipped. Always False without --simple-mode.
     """
-    # Emergency task override removed - config key no longer exists
-    # If needed in future, add 'disabled_tasks' list to flow_monitor config
-    return False
+    from tools.simple_mode import should_skip
+    return should_skip(task_name)
         
 def run_pipeline(collector, analyzer, alerts, storage, symbols, force=False, test_mode=False):
     """Simple dispatcher to appropriate pipeline based on context
@@ -2393,9 +2392,14 @@ def main():
                        help='Skip agent analysis (for testing FM only)')
     parser.add_argument('--agent-only', action='store_true',
                        help='Skip scans, only run agent on existing alerts')
+    parser.add_argument('--simple-mode', action='store_true',
+                       help='Collection-only: skip analysis, alerts, watchlist, news, sync (PRD 0014)')
 
     args = parser.parse_args()
     setup_logging(debug=args.debug)
+    if args.simple_mode:
+        from tools.simple_mode import enable
+        enable()
     signal.signal(signal.SIGINT, handle_shutdown)
 
     # Store args in __main__ for access by run_post_market()
