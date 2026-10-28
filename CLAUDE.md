@@ -25,9 +25,9 @@ This repo is **PUBLIC** at `github.com/klmn800/options_scanner` (read-only showc
 ---
 
 
-## CURRENT OPERATING MODE: Simple Mode trial (from 2026-10-20)
+## CURRENT OPERATING MODE: Simple Mode (default since 2026-10-28)
 
-**What:** Starting Tuesday 2026-10-20, the daily cycle runs in **Simple Mode**: headless and collection-only
+**What:** Since Tuesday 2026-10-20 (trial; made the default 2026-10-28), the daily cycle runs in **Simple Mode**: headless and collection-only
 (`main.py --simple-mode`, PRD 0014, `docs/simple_mode/README.md`). Flow Monitor collects `flow_options_scans`
 all day; the evening Option Pipeline, backups, Friday sector archive, Autofix and performance collection still run.
 Analysis, alerts, watchlist, news, email/X posting, morning OP, Earnings Intel, the Trading Advisor launch and
@@ -40,10 +40,11 @@ from the stored data. Decided with Ben 2026-10-16 to 10-19.
 
 **How it's scheduled:** two Task Scheduler tasks, only one enabled at a time:
 - `\!main.py (Simple Mode)` runs `wscript.exe "...\scheduled_tasks\start_main_simple.vbs"` (weekdays 6:35). **Enabled.**
-- `\!main.py` runs `scheduled_tasks\start_main.bat`, the full system. **Disabled by Ben** for the trial, kept to switch back.
+- `\!main.py` runs `scheduled_tasks\start_main.bat`, the full system. **Disabled**, kept to switch back.
 
-To switch modes, enable one task and disable the other. Status: **trial**. Ben reviews the first days, then
-decides whether Simple Mode stays the default. Update this section when that changes.
+To switch modes, enable one task and disable the other. Status: **default**. Ben kept it after a 6-day trial
+(10-20 to 10-27: 0 failed cycles, evening OP/backups OK daily, ~7% more cycles and ~10% more rows than full
+mode; long WAL checkpoints hold back the rest of the expected gain). Update this section if that changes.
 
 **What it means for a Claude session:**
 - `datalake_query.db` is **frozen** at 2026-10-19 (last full-mode sync). For current data, query

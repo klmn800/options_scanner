@@ -14,15 +14,21 @@ Simple Mode is an option, not a replacement. Without `--simple-mode`, `main.py` 
 |------|--------|
 | 2026-10-19 | Built and verified (stubbed dry runs, headless launcher test, tray tests). Last full-mode day. |
 | 2026-10-20 | **Trial starts.** `\!main.py (Simple Mode)` enabled, `\!main.py` (full) disabled. |
+| 2026-10-28 | **Default.** Ben kept Simple Mode after the 10-20 to 10-27 trial (results below). `\!main.py` stays disabled, kept for switching back. |
+
+**Trial results (10-20 to 10-27, 6 trading days):** 0 failed cycles, no Autofix fixes, evening OP and daily
+backup OK every day, Friday Weekly Backup and Sector Archive OK (the past-midnight Friday run recorded as
+Friday). Cycles/day 36, 40, 29, 34, 34, 38 (avg 35.2 vs ~33 in full mode, +7%); rows/day ~3.0M vs ~2.7M
+(+10%). Clean days reached the expected +15-20% (40 and 38 cycles). Long WAL checkpoints (300s to 1,570s)
+cost cycles on 10-20, 10-22 and 10-26. They also occur in full mode and have been more frequent since late
+September; whether Simple Mode contributes is unknown. The tray raised one real red alert (10-26, a 1,570s
+checkpoint stall).
 
 **Why:** Ben no longer uses the scanner day to day. Its lasting value is the intraday option snapshots, which
 can't be bought affordably, so the goal is to keep collecting them unattended with as few moving parts as
 possible. Dropping the per-cycle quick sync (~80s) and the 60s break should give ~20-25% more snapshots per
 day (an estimate from 10-15's cycle averages; the trial will measure it).
 
-**Trial review:** after each trial day, check the log, cycle count vs the ~33-cycle full-mode baseline, the
-evening Option Pipeline and the daily backup (tray health window, last 5 days panel). Then Ben decides whether
-Simple Mode stays the scheduled default.
 
 ## Switching modes
 
