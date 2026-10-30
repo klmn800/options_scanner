@@ -10,6 +10,7 @@ Features:
 - Individual symbol processing with proper rate limiting
 - Calculates derived fields (change_amount, change_percent)
 - Simple error handling and logging
+- Waits out network outages (up to 30 min per run) and retries affected symbols
 - ~759 API calls at 120/min = ~6-7 minutes total
 
 Author: Ben (migrated from FMP by Claude)
@@ -21,11 +22,19 @@ import sqlite3
 import time
 import logging
 import argparse
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Network outage handling. Local DNS/connectivity outages recur in bursts of
+# 1-18 minutes (measured 2026-10-30), so wait them out instead of failing the
+# whole universe. The wait budget is per run: Evening OP runs right after this.
+OUTAGE_CONSECUTIVE_ERRORS = 5
+OUTAGE_MAX_WAIT_SECONDS = 30 * 60
+OUTAGE_PROBE_INTERVAL_SECONDS = 30
 
 def get_klmn_800_symbols():
     """Get KLMN 800 symbols"""
@@ -106,6 +115,26 @@ def fetch_historical_tradier(api_client, symbol, start_date, end_date):
         import traceback
         logging.debug(f"Traceback for {symbol}: {traceback.format_exc()}")
         return []
+
+
+def wait_for_connectivity(api_client, max_wait_seconds):
+    """Probe Tradier until it responds or the wait budget runs out
+
+    Args:
+        api_client: TradierAPI instance
+        max_wait_seconds: Seconds available to wait
+
+    Returns:
+        tuple: (recovered, seconds_waited)
+    """
+    start = time.time()
+
+    while time.time() - start < max_wait_seconds:
+        time.sleep(OUTAGE_PROBE_INTERVAL_SECONDS)
+        if api_client.test_connection(max_attempts=1):
+            return True, time.time() - start
+
+    return False, time.time() - start
 
 
 def calculate_change_fields(open_price, close_price):
@@ -292,10 +321,17 @@ def main():
         failed_symbols = []
         successful_symbols = []  # Track symbols that got data
         start_time = time.time()
+        pending = deque(symbols)
+        connection_failed = []  # Current streak of symbols lost to connection errors
+        outage_wait_remaining = OUTAGE_MAX_WAIT_SECONDS
+        outage_seconds_waited = 0
+        outage_aborted = False
 
-        for i, symbol in enumerate(symbols):
+        while pending:
+            symbol = pending.popleft()
 
             # Progress logging every 50 symbols
+            i = len(successful_symbols) + len(failed_symbols)
             if i > 0 and i % 50 == 0:
                 elapsed = time.time() - start_time
                 rate = i / elapsed if elapsed > 0 else 0
@@ -303,6 +339,7 @@ def main():
                 logging.info(f"Progress: {i}/{len(symbols)} symbols ({rate:.1f}/sec, ETA: {eta/60:.1f}min)")
 
             # Fetch data from Tradier
+            connection_errors_before = api_client.connection_errors
             historical_data = fetch_historical_tradier(
                 api_client,
                 symbol,
@@ -310,6 +347,36 @@ def main():
                 end_date.strftime('%Y-%m-%d')
             )
             api_calls += 1
+
+            # Connection errors say nothing about the symbol: retry it, don't fail it
+            if api_client.connection_errors > connection_errors_before:
+                connection_failed.append(symbol)
+
+                if len(connection_failed) >= OUTAGE_CONSECUTIVE_ERRORS:
+                    logging.warning(f"Network outage suspected: {len(connection_failed)} consecutive connection errors, "
+                                    f"waiting up to {outage_wait_remaining/60:.0f} minutes for Tradier")
+                    recovered, waited = wait_for_connectivity(api_client, outage_wait_remaining)
+                    outage_wait_remaining -= waited
+                    outage_seconds_waited += waited
+
+                    if not recovered:
+                        logging.error(f"Network outage: Tradier unreachable after {outage_seconds_waited/60:.1f} "
+                                      f"minutes of waiting, stopping backfill")
+                        outage_aborted = True
+                        break
+
+                    # Retry at the end so symbols that keep failing can't starve the rest
+                    logging.info(f"Connectivity restored after {waited/60:.1f} minutes, retrying {len(connection_failed)} symbols")
+                    pending.extend(connection_failed)
+                    connection_failed = []
+                    continue
+
+                time.sleep(0.5)
+                continue
+
+            # A successful connection ends the streak: retry its symbols at the end
+            pending.extend(connection_failed)
+            connection_failed = []
 
             # Process and store
             if historical_data:
@@ -327,6 +394,10 @@ def main():
             # Rate limiting: 120/min = 0.5s per call
             time.sleep(0.5)
 
+        # Symbols still unresolved when the loop ended (outage abort or trailing streak)
+        failed_symbols.extend(connection_failed)
+        failed_symbols.extend(pending)
+
         elapsed_total = time.time() - start_time
 
         # Calculate success metrics
@@ -338,10 +409,16 @@ def main():
         logging.info(f"Total records updated: {total_records}")
         logging.info(f"API calls made: {api_calls}")
         logging.info(f"Total time: {elapsed_total/60:.1f} minutes")
+        if outage_seconds_waited > 0:
+            logging.warning(f"Network outage: waited {outage_seconds_waited/60:.1f} minutes, "
+                            f"{api_client.connection_errors} connection errors")
 
         # Data quality check: if we got 0 records from all symbols, something is wrong
         if api_calls > 0 and total_records == 0:
-            logging.error("Data quality issue: 0 records inserted from all API calls")
+            if outage_aborted:
+                logging.error("Network outage: 0 records inserted, Tradier never became reachable")
+            else:
+                logging.error("Data quality issue: 0 records inserted from all API calls")
             from tools.autofix import queue_error
             queue_error(
                 error_type='tradier_backfill_no_data',
@@ -349,7 +426,10 @@ def main():
                     'symbols_attempted': len(symbols),
                     'api_calls_made': api_calls,
                     'date_range': f"{start_date} to {end_date}",
-                    'failed_symbols_count': len(failed_symbols)
+                    'failed_symbols_count': len(failed_symbols),
+                    'connection_errors': api_client.connection_errors,
+                    'outage_aborted': outage_aborted,
+                    'outage_minutes_waited': round(outage_seconds_waited / 60, 1)
                 },
                 severity='ERROR'
             )
@@ -381,7 +461,9 @@ def main():
                         'failure_rate': round(failure_rate, 3),
                         'api_calls_made': api_calls,
                         'records_updated': total_records,
-                        'failed_symbol_sample': failed_symbols[:20]
+                        'failed_symbol_sample': failed_symbols[:20],
+                        'connection_errors': api_client.connection_errors,
+                        'outage_aborted': outage_aborted
                     },
                     severity='ERROR'
                 )
